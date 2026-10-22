@@ -1,0 +1,99 @@
+--- a/headless/Headless.cpp	2026-10-23 00:07:23.249447004 +0200
++++ b/headless/Headless.cpp	2026-10-23 00:07:23.237446846 +0200
+@@ -179,7 +179,86 @@
+ 	bool bench : 1;
+ };
+ 
++// --- recomp comparison hooks (local patch) ---------------------------------------
++// PPSSPP_INPUT="16=start,20.5=cross+down,30=cross:1.0": buttons at emulated seconds
++// (same syntax as the recompiled runtime's CTW_INPUT). PPSSPP_SHOT_EVERY=N: write the
++// displayed framebuffer to pshot_NNN.ppm every N emulated seconds.
++#include "Core/HLE/sceCtrl.h"
++#include "Core/HLE/sceDisplay.h"
++#include "Core/CoreTiming.h"
++#include "Core/MemMap.h"
++struct ScriptPress { double t, dur; u32 buttons; };
++static std::vector<ScriptPress> g_script;
++static void ParseScript() {
++	const char *e = getenv("PPSSPP_INPUT");
++	if (!e) return;
++	static const struct { const char *n; u32 b; } names[] = {
++		{"select", 0x1}, {"start", 0x8}, {"up", 0x10}, {"right", 0x20}, {"down", 0x40}, {"left", 0x80},
++		{"l", 0x100}, {"r", 0x200}, {"triangle", 0x1000}, {"circle", 0x2000}, {"cross", 0x4000}, {"square", 0x8000}};
++	std::string str = e;
++	size_t i = 0;
++	while (i < str.size()) {
++		size_t j = str.find(',', i);
++		if (j == std::string::npos) j = str.size();
++		std::string item = str.substr(i, j - i);
++		i = j + 1;
++		size_t eq = item.find('=');
++		if (eq == std::string::npos) continue;
++		ScriptPress p{atof(item.c_str()), 0.15, 0};
++		std::string rest = item.substr(eq + 1);
++		size_t colon = rest.find(':');
++		if (colon != std::string::npos) { p.dur = atof(rest.c_str() + colon + 1); rest = rest.substr(0, colon); }
++		size_t k = 0;
++		while (k <= rest.size()) {
++			size_t plus = rest.find('+', k);
++			if (plus == std::string::npos) plus = rest.size();
++			std::string n = rest.substr(k, plus - k);
++			for (auto &nm : names) if (n == nm.n) p.buttons |= nm.b;
++			k = plus + 1;
++		}
++		g_script.push_back(p);
++	}
++}
++static void ScriptTick() {
++	static double shotEvery = getenv("PPSSPP_SHOT_EVERY") ? atof(getenv("PPSSPP_SHOT_EVERY")) : 0;
++	static double nextShot = shotEvery;
++	static int shotN = 0;
++	double now = CoreTiming::GetGlobalTimeUs() / 1e6;
++	u32 b = 0;
++	for (auto &p : g_script) if (now >= p.t && now < p.t + p.dur) b |= p.buttons;
++	__CtrlUpdateButtons(b, ~b & 0xFFFF);
++	if (shotEvery > 0 && now >= nextShot) {
++		nextShot += shotEvery;
++		PSPPointer<u8> top; u32 stride = 0, fmt = 0;
++		if (__DisplayGetFramebuf(&top, &stride, &fmt, 0) && Memory::IsValidAddress(top.ptr)) {
++			char name[64];
++			snprintf(name, sizeof(name), "pshot_%03d.ppm", shotN++);
++			FILE *f = fopen(name, "wb");
++			fprintf(f, "P6\n480 272\n255\n");
++			const u8 *src = Memory::GetPointer(top.ptr);
++			for (int y = 0; y < 272; y++)
++				for (int x = 0; x < 480; x++) {
++					u8 rgb[3];
++					if (fmt == 3) {
++						const u8 *q = src + (y * stride + x) * 4;
++						rgb[0] = q[0]; rgb[1] = q[1]; rgb[2] = q[2];
++					} else {
++						u16 v; memcpy(&v, src + (y * stride + x) * 2, 2);
++						if (fmt == 0) { rgb[0] = (v & 31) << 3; rgb[1] = ((v >> 5) & 63) << 2; rgb[2] = (v >> 11) << 3; }
++						else if (fmt == 1) { rgb[0] = (v & 31) << 3; rgb[1] = ((v >> 5) & 31) << 3; rgb[2] = ((v >> 10) & 31) << 3; }
++						else { rgb[0] = (v & 15) << 4; rgb[1] = ((v >> 4) & 15) << 4; rgb[2] = ((v >> 8) & 15) << 4; }
++					}
++					fwrite(rgb, 1, 3, f);
++				}
++			fclose(f);
++			printf("shot %s at %.1fs\n", name, now);
++			fflush(stdout);
++		}
++	}
++}
++
+ bool RunAutoTest(HeadlessHost *headlessHost, CoreParameter &coreParameter, const AutoTestOptions &opt) {
++	ParseScript();
+ 	// Kinda ugly, trying to guesstimate the test name from filename...
+ 	currentTestName = GetTestName(coreParameter.fileToStart);
+ 
+@@ -231,7 +310,8 @@
+ 	coreState = coreParameter.startBreak ? CORE_STEPPING_CPU : CORE_RUNNING_CPU;
+ 	while (coreState == CORE_RUNNING_CPU || coreState == CORE_STEPPING_CPU)
+ 	{
+-		int blockTicks = (int)usToCycles(1000000 / 10);
++		int blockTicks = (int)usToCycles(1000000 / 60);
++		ScriptTick();
+ 		PSP_RunLoopFor(blockTicks);
+ 
+ 		// If we were rendering, this might be a nice time to do something about it.
