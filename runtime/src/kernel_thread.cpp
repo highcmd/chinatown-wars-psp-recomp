@@ -1053,8 +1053,6 @@ static void mutex_lock(CPUState *c, bool cb, bool tryOnly) {
 	auto it = s_mutexes.find(id);
 	if (it == s_mutexes.end()) { RET(SCE_KERNEL_ERROR_MUTEX_NOT_FOUND); return; }
 	Mutex &m = it->second;
-	if (id != 262) LOGT("lock mutex %d '%s' n=%d count %d owner %d%s timeout %u ra=%08x", id, m.name.c_str(), n, m.count, m.owner,
-	                    tryOnly ? " (try)" : cb ? " (CB)" : "", ARG(2) ? LW(ARG(2)) : 0, c->r[31]);
 	if (n <= 0 || (!(m.attr & MUTEX_RECURSIVE) && n > 1)) { RET(SCE_KERNEL_ERROR_ILLEGAL_COUNT); return; }
 	if (m.count == 0) {
 		m.count = n;
@@ -1081,7 +1079,6 @@ HLE(ThreadManForUser, sceKernelUnlockMutex) {
 	auto it = s_mutexes.find(id);
 	if (it == s_mutexes.end()) { RET(SCE_KERNEL_ERROR_MUTEX_NOT_FOUND); return; }
 	Mutex &m = it->second;
-	if (id != 262) LOGT("unlock mutex %d '%s' n=%d count %d owner %d ra=%08x", id, m.name.c_str(), n, m.count, m.owner, c->r[31]);
 	if (n <= 0) { RET(SCE_KERNEL_ERROR_ILLEGAL_COUNT); return; }
 	if (m.count == 0 || m.owner != s_cur->id) { RET(SCE_KERNEL_ERROR_MUTEX_UNLOCKED); return; }
 	if (m.count < n) { RET(SCE_KERNEL_ERROR_MUTEX_UNLOCK_UNDERFLOW); return; }
