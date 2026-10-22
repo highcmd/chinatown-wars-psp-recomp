@@ -74,20 +74,24 @@ cd chinatown-wars-psp-recomp
 ./setup.sh ~/Downloads/chinatown-wars.iso
 ```
 
-The setup takes about a minute on a modern 8-core CPU (the Windows build adds a one-time download
+The setup takes about a minute and a half on a modern 8-core CPU (the Windows build adds a one-time download
 of about 300 MB). It prints each step:
 
 ```
 ==> checking the image
-    ULUS-10491, EBOOT.BIN a4c5228605af… OK
-==> extracting EBOOT.BIN to extracted/
-    3 files, 1 MiB
+    ULUS-10490, EBOOT.BIN 3891fcb776cf… OK
+==> extracting EBOOT.BIN and OVERLAYS.PAK to extracted/
+    4 files, 6 MiB
 ==> building the EBOOT decryptor (tools/prxdecrypt)
 ==> decrypting EBOOT.BIN
-    BOOT.BIN a20284d2763c… OK
+    BOOT.BIN eba6b2b693cc… OK
+==> unpacking the code overlays
+    166 overlays
 ==> analysing BOOT.BIN (function discovery)
+    overlays: 166 (166 with distinct code), 22579 functions, 137 jump tables, ...
 ==> recompiling MIPS to C++ (build/gen)
-    4079 functions in 28 files; 0 unhandled instructions; VFPU handlers: 0
+    166 overlays: 22579 functions; 1 unhandled instructions (in data traced as code ...)
+    12222 functions in 82 files; 0 unhandled instructions; VFPU handlers: 23
 ==> configuring and building
 ==> done. Start the game with ./run.sh (options: ./run.sh --help)
 ```

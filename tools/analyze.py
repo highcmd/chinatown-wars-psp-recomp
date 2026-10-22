@@ -455,7 +455,8 @@ def main():
         text = ov.sections[".text"]
         key = (ov.base, bytes(ov.mem[text[0] - ov.base:text[0] - ov.base + text[1]]))
         entry = {"id": num, "name": ov.overlay_name, "file": path.name, "base": ov.base,
-                 "size": ov.size, "code": [text[0], text[0] + text[1]]}
+                 "size": text[0] + text[1] - ov.base,   # exact: the slots are adjacent
+                 "code": [text[0], text[0] + text[1]]}
         if key in seen:
             entry["same_code_as"] = seen[key]
         else:

@@ -13,7 +13,7 @@ import json, os, pathlib, platform, queue, shutil, subprocess, sys, threading, t
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.0"
 BUILD_VERSION = "0.1.0"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
 FROZEN = getattr(sys, "frozen", False)
 IS_WIN = os.name == "nt"
