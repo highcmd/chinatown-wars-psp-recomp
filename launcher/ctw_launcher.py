@@ -13,8 +13,8 @@ import json, os, pathlib, platform, queue, shutil, subprocess, sys, threading, t
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-APP_VERSION = "0.1.1"
-BUILD_VERSION = "0.1.1"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
+APP_VERSION = "0.1.2"
+BUILD_VERSION = "0.1.2"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
 FROZEN = getattr(sys, "frozen", False)
 IS_WIN = os.name == "nt"
 HERE = pathlib.Path(__file__).resolve().parent
@@ -38,7 +38,7 @@ TEXT = {
         "legal": "Use a dump of a UMD you own. The game is built on this computer from your copy; "
                  "nothing from the game is downloaded or shared.",
         "resolution": "Window size", "desktop": "Desktop", "fullscreen": "Fullscreen",
-        "fps": "Frame rate (races)", "fps30": "30 (original)", "fps60": "60", "fps120": "120",
+        "fps": "Frame rate", "fps30": "30 (original)", "fps60": "60 (in-between frames)",
         "vsync": "VSync (no tearing; caps the frame rate at the monitor refresh rate)",
         "scale": "Internal resolution", "scale_auto": "Auto (match the window)",
         "filter": "Scaling", "filter_linear": "Smooth", "filter_nearest": "Sharp pixels",
@@ -75,7 +75,7 @@ TEXT = {
         "legal": "Użyj zrzutu własnej płyty UMD. Gra jest budowana na tym komputerze z Twojej kopii; "
                  "nic z gry nie jest pobierane ani udostępniane.",
         "resolution": "Rozmiar okna", "desktop": "Pulpit", "fullscreen": "Pełny ekran",
-        "fps": "Klatki na sekundę (wyścigi)", "fps30": "30 (oryginał)", "fps60": "60", "fps120": "120",
+        "fps": "Klatki na sekundę", "fps30": "30 (oryginał)", "fps60": "60 (klatki pośrednie)",
         "vsync": "VSync (bez rozrywania obrazu; ogranicza fps do odświeżania monitora)",
         "scale": "Rozdzielczość wewnętrzna", "scale_auto": "Auto (dopasuj do okna)",
         "filter": "Skalowanie", "filter_linear": "Gładkie", "filter_nearest": "Ostre piksele",
@@ -486,7 +486,14 @@ class Launcher:
         self.refresh_cb.pack(side="left", padx=6)
         self.refresh_cb.bind("<<ComboboxSelected>>", lambda e: self.update_hint())
 
-        self.fps_var = tk.StringVar(value="60")   # the game runs at 60 fps natively
+        # the game logic runs at 30 fps; 60 adds in-between frames (NOTES.md)
+        ttk.Label(f, text=L["fps"]).grid(row=3, column=0, sticky="w", pady=4)
+        fr = ttk.Frame(f)
+        fr.grid(row=3, column=1, sticky="w", pady=4)
+        self.fps_var = tk.StringVar(value="30")
+        for val in ("30", "60"):
+            ttk.Radiobutton(fr, text=L["fps" + val], value=val, variable=self.fps_var,
+                            command=self.update_hint).pack(side="left", padx=(0, 14))
         self.vsync_var = tk.BooleanVar()
         ttk.Checkbutton(f, text=L["vsync"], variable=self.vsync_var, command=self.update_hint).grid(
             row=4, column=1, sticky="w", pady=4)
@@ -640,6 +647,7 @@ class Launcher:
         self.dz_var.set(round(dz * 100 / 32767))
         self.dz_label.configure(text=f"{self.dz_var.get()} %")
         self.rstick_var.set(ini.get("right_stick_dpad", "false") in ("1", "true", "on", "yes"))
+        self.fps_var.set("60" if ini.get("fps", "30") == "60" else "30")
         self.tpcam_var.set(ini.get("third_person_camera", "false") in ("1", "true", "on", "yes"))
         try:
             self.cam_var.set(max(1000, min(200000, int(ini.get("camera_height", "15000")))))
@@ -659,6 +667,7 @@ class Launcher:
             "deadzone": str(self.dz_raw if self.dz_var.get() == round(self.dz_raw * 100 / 32767)
                             else round(self.dz_var.get() * 32767 / 100)),
             "right_stick_dpad": b(self.rstick_var.get()),
+            "fps": self.fps_var.get(),
             "third_person_camera": b(self.tpcam_var.get()), "camera_height": str(self.cam_var.get()),
         })
         for name, _, _, pads in INPUTS:
@@ -692,7 +701,7 @@ class Launcher:
 
     def update_hint(self):
         hz = self.refresh_hz() if self.fs_var.get() and self.refresh_hz() else self.mon[2]
-        if hz and self.vsync_var.get() and 60 > hz:
+        if hz and self.vsync_var.get() and int(self.fps_var.get()) > hz:
             self.hint.configure(text=L["fps_hint"].format(hz=hz))
         else:
             self.hint.configure(text="")

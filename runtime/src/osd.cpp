@@ -4,6 +4,7 @@
 #include "recomp.h"
 #include "hle.h"
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <mutex>
@@ -61,17 +62,21 @@ void osd_message(const char *fmt, ...) {
 
 void osd_on_vblank() {
 	extern u64 g_frames_finished;
-	static u64 lastT, lastF;
+	extern std::atomic<u64> g_pictures;   // GL presenter: includes in-between frames
+	static u64 lastT, lastF, lastP;
 	u64 now = rt_time_us();
 	if (now - lastT < 500000) return;
 	if (lastT) {
-		char buf[32];
-		snprintf(buf, sizeof(buf), "%.0f FPS", (g_frames_finished - lastF) * 1e6 / (now - lastT));
+		char buf[48];
+		double game = (g_frames_finished - lastF) * 1e6 / (now - lastT), shown = (g_pictures - lastP) * 1e6 / (now - lastT);
+		if (shown > game * 1.5) snprintf(buf, sizeof(buf), "%.0f FPS (GAME %.0f)", shown, game);
+		else snprintf(buf, sizeof(buf), "%.0f FPS", game);
 		std::lock_guard<std::mutex> lk(s_mtx);
 		s_fps_text = buf;
 	}
 	lastT = now;
 	lastF = g_frames_finished;
+	lastP = g_pictures;
 }
 
 bool osd_build(std::vector<u32> &px, int &w, int &h) {

@@ -97,9 +97,15 @@ borderless there.
 
 ### Frame rate
 
-The game runs at 30 fps, like on the PSP (it renders every second vblank). Use `vsync = true` with a
-60 Hz mode (or `refresh = 60` in fullscreen) for the smoothest motion; on a 120 Hz monitor each frame
-is shown four times, which is just as even.
+The game logic runs at 30 fps, like on the PSP (one fixed step per frame; it renders every second
+vblank). `fps = 60` (`--fps 60`, launcher: Frame rate 60) shows an in-between picture after every game
+frame: the frame is drawn a second time with every vertex halfway between its position in the previous
+frame and in this one. Motion and camera pans look like 60 fps, the game itself still runs at 30, and
+the picture is one 60 Hz frame later. Objects that can't be paired with the previous frame (new ones,
+some effects and shadows) keep their new position in the in-between picture. GPU renderer only; F2
+shows e.g. "60 FPS (GAME 30)".
+
+Use `vsync = true` with a 60 Hz mode (or `refresh = 60` in fullscreen) for the smoothest motion.
 
 ### Gamepads
 

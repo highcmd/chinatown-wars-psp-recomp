@@ -14,6 +14,7 @@
 
 #include "platform.h"
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cstddef>
 #include <condition_variable>
@@ -38,6 +39,8 @@ struct ColorTarget {
 	GLsync fence = nullptr;
 	u64 lastDrawUs = 0;
 	bool drawnSinceFence = false;
+	GLuint midTex = 0;          // frame interpolation: the in-between picture of this target
+	bool midPending = false;    // set at FINISH, cleared when the present thread has shown it
 };
 std::mutex g_tmtx;
 std::map<u32, ColorTarget> g_color;      // by VRAM address (0x04xxxxxx)
@@ -46,6 +49,10 @@ std::atomic<u64> g_frameSerial{0};
 SDL_Window *g_win, *g_geWin;
 SDL_GLContext g_presentCtx, g_geCtx;
 bool g_active, g_headless, g_vsync, g_linear, g_stencilExport;
+std::atomic<bool> g_interp{false};
+}
+std::atomic<u64> g_pictures{0};      // pictures shown (game frames + in-between ones), for the FPS meter
+namespace {   // 60 fps by in-between frames (fps = 60)
 int TW = 512, TH = 512;
 
 // ------------------------------------------------------------------ helpers
@@ -424,8 +431,35 @@ bool gl_has_color_target(u32 addr) {
 	return it != g_color.end() && it->second.tex;
 }
 
-void gl_ge_draw(const GLDrawState &st, const GLVert *v, int count) {
-	if (count <= 0 || !ge_init()) return;
+// Texture for a draw: the decoded cache entry uploaded to its GL texture. While a frame is
+// recorded, a texture whose pixels change after a recorded draw used it gets a new GL texture,
+// so the recorded draw keeps the old picture.
+std::map<GLTexRef *, GLuint> g_frameTex;   // texture entries used by the recorded frame
+std::vector<GLuint> g_retiredTex;          // replaced mid-frame; deleted after the frame
+
+GLuint resolve_texture(const GLDrawState &st) {
+	if (!st.tex || st.clear || st.fboTexAddr || !st.texRef) return 0;
+	GLTexRef &r = *st.texRef;
+	if (r.id && r.version != st.texVersion && g_interp) {
+		auto it = g_frameTex.find(&r);
+		if (it != g_frameTex.end() && it->second == r.id) {
+			g_retiredTex.push_back(r.id);
+			r.id = 0;
+		}
+	}
+	if (!r.id) glGenTextures(1, &r.id);
+	glBindTexture(GL_TEXTURE_2D, r.id);
+	if (r.version != st.texVersion) {
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, st.texW, st.texH, 0, GL_RGBA, GL_UNSIGNED_BYTE, st.texPixels);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+		r.version = st.texVersion;
+	}
+	if (g_interp) g_frameTex[&r] = r.id;
+	return r.id;
+}
+
+void exec_draw(const GLDrawState &st, GLuint texId, const GLVert *v, int count) {
 	bool fbHasAlpha = st.fbFmt != 0;
 	GLuint ct = color_target(st.fbAddr, st.fbStride, st.fbFmt);
 	GLuint dt = depth_target(st.zbAddr);
@@ -502,17 +536,8 @@ void gl_ge_draw(const GLDrawState &st, const GLVert *v, int count) {
 			if (it != g_color.end()) tex = it->second.tex;
 			uvsx = st.texW / 512.0f;
 			uvsy = st.texH / 512.0f;
-		} else if (st.texRef) {
-			GLTexRef &r = *st.texRef;
-			if (!r.id) glGenTextures(1, &r.id);
-			glBindTexture(GL_TEXTURE_2D, r.id);
-			if (r.version != st.texVersion) {
-				glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, st.texW, st.texH, 0, GL_RGBA, GL_UNSIGNED_BYTE, st.texPixels);
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-				r.version = st.texVersion;
-			}
-			tex = r.id;
+		} else {
+			tex = texId;
 		}
 		glBindTexture(GL_TEXTURE_2D, tex);
 		glBindSampler(0, G.samplers[(st.texLinear ? 1 : 0) | (st.clampU || st.fboTexAddr ? 2 : 0) | (st.clampV || st.fboTexAddr ? 4 : 0)]);
@@ -535,8 +560,157 @@ void gl_ge_draw(const GLDrawState &st, const GLVert *v, int count) {
 	glDrawArrays(GL_TRIANGLES, 0, count);
 }
 
+// ------------------------------------------------------------------ frame interpolation
+// The game logic advances one fixed step per frame at 30 fps (NOTES.md), so 60 fps comes
+// from in-between pictures. With g_interp the draws of a frame are recorded instead of
+// executed. At FINISH the frame is executed twice: first with every vertex position halfway
+// between this frame and the matching draw of the previous one (the result of each target is
+// kept as its midTex), then as it is. The present thread shows the in-between picture at the
+// first vblank after the flip and the real one at the next.
+namespace {
+struct DrawRec {
+	GLDrawState st;
+	GLuint texId;
+	u32 first, count;      // range in g_recVerts
+	u64 key;               // matches the same draw across frames
+};
+std::vector<DrawRec> g_rec, g_prevRec;
+std::vector<GLVert> g_recVerts, g_prevVerts, g_midVerts;
+u64 g_interpDraws, g_interpMatched;   // statistics
+
+u64 draw_key(const GLDrawState &st, GLuint, int count) {
+	u64 tex = st.fboTexAddr ? st.fboTexAddr : (u64)(uintptr_t)st.texRef;
+	// not the target address: the game alternates two display buffers
+	return (tex * 0x9E3779B97F4A7C15ull) ^ ((u64)st.fbStride << 40) ^ ((u64)count << 1) ^ (st.clear ? 1 : 0);
+}
+
+void record_draw(const GLDrawState &st, GLuint texId, const GLVert *v, int count) {
+	DrawRec r;
+	r.st = st;
+	r.st.texPixels = nullptr;
+	r.texId = texId;
+	r.first = (u32)g_recVerts.size();
+	r.count = (u32)count;
+	r.key = draw_key(st, texId, count);
+	g_recVerts.insert(g_recVerts.end(), v, v + count);
+	g_rec.push_back(r);
+}
+
+// Halfway positions for this frame's draws; draws without a plausible partner stay as they are.
+void build_mid() {
+	g_midVerts = g_recVerts;
+	std::map<u64, std::vector<u32>> prev;   // key -> previous draws in order
+	for (u32 i = 0; i < g_prevRec.size(); i++) prev[g_prevRec[i].key].push_back(i);
+	std::map<u64, size_t> used;
+	for (const DrawRec &d : g_rec) {
+		g_interpDraws++;
+		auto it = prev.find(d.key);
+		if (it == prev.end()) continue;
+		size_t &k = used[d.key];
+		if (k >= it->second.size()) continue;
+		const DrawRec &p = g_prevRec[it->second[k++]];
+		if (p.count != d.count) continue;
+		const GLVert *a = &g_prevVerts[p.first], *b = &g_recVerts[d.first];
+		// reject partners that moved implausibly far (another object, a camera cut)
+		double sum = 0;
+		int n = 0;
+		for (u32 i = 0; i < d.count; i += 3) {
+			if (a[i].w <= 0 || b[i].w <= 0) continue;
+			sum += std::fabs(a[i].x / a[i].w - b[i].x / b[i].w) + std::fabs(a[i].y / a[i].w - b[i].y / b[i].w);
+			n++;
+		}
+		if (n && sum / n > 0.5) continue;
+		GLVert *m = &g_midVerts[d.first];
+		for (u32 i = 0; i < d.count; i++) {
+			m[i].x = 0.5f * (a[i].x + b[i].x);
+			m[i].y = 0.5f * (a[i].y + b[i].y);
+			m[i].z = 0.5f * (a[i].z + b[i].z);
+			m[i].w = 0.5f * (a[i].w + b[i].w);
+		}
+		g_interpMatched++;
+	}
+}
+
+// Copy every target this frame drew into to its midTex.
+void snapshot_mid(const std::vector<u32> &targets) {
+	for (u32 addr : targets) {
+		GLuint src, mid;
+		{
+			std::lock_guard<std::mutex> lk(g_tmtx);
+			ColorTarget &t = g_color[addr];
+			if (!t.midTex) {
+				glGenTextures(1, &t.midTex);
+				glBindTexture(GL_TEXTURE_2D, t.midTex);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TW, TH, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			}
+			src = t.tex;
+			mid = t.midTex;
+		}
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo_for(src, 0));
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo_for(mid, 0));
+		glDisable(GL_SCISSOR_TEST);
+		glBlitFramebuffer(0, 0, TW, TH, 0, 0, TW, TH, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+	}
+}
+
+void run_recorded_frame() {
+	if (g_rec.empty()) return;
+	std::vector<u32> targets;
+	for (const DrawRec &d : g_rec) {
+		u32 a = d.st.fbAddr & 0x0FFFFFFF;
+		if (std::find(targets.begin(), targets.end(), a) == targets.end()) targets.push_back(a);
+	}
+	bool mid = !g_prevRec.empty();
+	if (mid) {
+		build_mid();
+		for (const DrawRec &d : g_rec) exec_draw(d.st, d.texId, &g_midVerts[d.first], (int)d.count);
+		snapshot_mid(targets);
+	}
+	for (const DrawRec &d : g_rec) exec_draw(d.st, d.texId, &g_recVerts[d.first], (int)d.count);
+	if (mid) {
+		std::lock_guard<std::mutex> lk(g_tmtx);
+		for (u32 a : targets) g_color[a].midPending = true;
+	}
+	static int frames;
+	if (++frames % 300 == 0 && g_interpDraws) {
+		rt_log(LOG_GE, "interpolation: %.0f%% of %llu draws matched", 100.0 * g_interpMatched / g_interpDraws, (unsigned long long)g_interpDraws);
+		g_interpDraws = g_interpMatched = 0;
+	}
+	std::swap(g_prevRec, g_rec);
+	std::swap(g_prevVerts, g_recVerts);
+	g_rec.clear();
+	g_recVerts.clear();
+	g_frameTex.clear();
+	if (!g_retiredTex.empty()) {
+		glDeleteTextures((GLsizei)g_retiredTex.size(), g_retiredTex.data());
+		g_retiredTex.clear();
+	}
+}
+
+}  // namespace
+
+void gl_ge_draw(const GLDrawState &st, const GLVert *v, int count) {
+	if (count <= 0 || !ge_init()) return;
+	GLuint texId = resolve_texture(st);
+	if (g_interp) {
+		color_target(st.fbAddr, st.fbStride, st.fbFmt);   // created (from VRAM) in order
+		record_draw(st, texId, v, count);
+		if (g_rec.size() > 200000) {   // a frame without FINISH: don't grow forever
+			for (const DrawRec &d : g_rec) exec_draw(d.st, d.texId, &g_recVerts[d.first], (int)d.count);
+			g_rec.clear(); g_recVerts.clear(); g_prevRec.clear(); g_prevVerts.clear(); g_frameTex.clear();
+		}
+		return;
+	}
+	exec_draw(st, texId, v, count);
+}
+
+void gl_set_interpolation(bool on) { g_interp = on; }
+
 void gl_ge_frame_done() {
 	if (!G.inited || G.failed) return;
+	run_recorded_frame();
 	{
 		std::lock_guard<std::mutex> lk(g_tmtx);
 		for (auto &[addr, t] : g_color) {
@@ -640,13 +814,20 @@ void present_thread() {
 		u64 serial = g_frameSerial.load(), now = rt_time_us();
 		if (shot.empty() && serial == lastSerial && req.fb == lastFb && now - lastPresentUs < 50000) continue;
 
-		GLuint tex = 0;
+		GLuint tex = 0, midForShot = 0;
+		bool showedMid = false;
 		int srcW = 480, srcH = 272, texW = 512, texH = 512;
 		{
 			std::lock_guard<std::mutex> lk(g_tmtx);
 			auto it = g_color.find(req.fb & 0x0FFFFFFF);
 			if (it != g_color.end() && it->second.tex && now - it->second.lastDrawUs < 500000) {
 				tex = it->second.tex;
+				if (it->second.midPending && it->second.midTex && shot.empty()) {   // in-between picture first
+					tex = it->second.midTex;
+					it->second.midPending = false;
+					showedMid = true;
+				}
+				if (!shot.empty() && getenv("CTW_SHOT_MID")) midForShot = it->second.midTex;
 				if (it->second.fence) glWaitSync(it->second.fence, 0, GL_TIMEOUT_IGNORED);
 				srcW = 480 * g_render_scale;
 				srcH = 272 * g_render_scale;
@@ -705,6 +886,13 @@ void present_thread() {
 			glReadPixels(0, 0, srcW, srcH, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
 			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 			write_ppm(shot, px, srcW, srcH);   // GL row 0 = PSP top row
+			if (midForShot) {   // debug: the in-between picture of the same frame
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, readFbo);
+				glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, midForShot, 0);
+				glReadPixels(0, 0, srcW, srcH, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+				glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+				write_ppm(shot.substr(0, shot.size() - 4) + "_mid.ppm", px, srcW, srcH);
+			}
 			if (getenv("CTW_DUMP_RT")) {   // debug: every colour target next to the shot
 				std::vector<std::pair<u32, GLuint>> all;
 				{
@@ -740,7 +928,8 @@ void present_thread() {
 				glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 			}
 		}
-		lastSerial = serial;
+		g_pictures++;
+		lastSerial = showedMid ? ~0ull : serial;   // the real picture follows at the next vblank
 		lastFb = req.fb;
 		lastPresentUs = now;
 	}

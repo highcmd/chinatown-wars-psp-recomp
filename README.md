@@ -66,7 +66,8 @@ Not done yet, or not checked:
 - saves are written, but loading them back has not been tested
 - ad hoc multiplayer and the online features are stubbed: no partner, no network
 - the CPU (software) renderer draws the bloom pass wrongly (bright streaks); use the GPU renderer
-- the game runs at its original 30 fps
+- the game logic runs at its original 30 fps; `fps = 60` adds in-between frames (smooth motion,
+  experimental; objects without a partner in the previous frame, such as some shadows, can lag)
 
 ## License
 

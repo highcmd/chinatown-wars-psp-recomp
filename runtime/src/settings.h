@@ -4,7 +4,7 @@
 #include <string>
 
 struct Settings {
-	int fps = 30;              // 30 = original pacing, 60 / 120 = raised game rate (time-based engine)
+	int fps = 30;              // 30 = the game's rate; 60 = in-between frames (GL renderer)
 	int width = 960;           // window size (output resolution)
 	int height = 544;
 	int renderScale = 0;

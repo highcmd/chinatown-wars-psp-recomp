@@ -96,6 +96,7 @@ void display_init(bool headless) {
 	s_win = SDL_CreateWindow(window_title(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, st.width, st.height, flags);
 	if (s_win && exclusive && !headless) enter_fullscreen();
 	if (wantGL && s_win && gl_display_init(s_win, headless, st.vsync, st.linear)) {
+		gl_set_interpolation(st.fps >= 60);
 		s_gl = true;
 	} else {
 		if (wantGL) rt_log_error("OpenGL renderer unavailable; falling back to the software renderer");

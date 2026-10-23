@@ -52,6 +52,7 @@ struct GLDrawState {
 bool gl_backend_active();
 void gl_ge_draw(const GLDrawState &st, const GLVert *v, int count);
 void gl_ge_frame_done();               // FINISH: publish fences for the display
+void gl_set_interpolation(bool on);    // 60 fps by in-between frames (fps = 60)
 bool gl_has_color_target(uint32_t vramAddr);
 bool gl_find_color_target(uint32_t vramAddr, uint32_t *base, uint32_t *stride, uint32_t *fmt);
 int gl_target_width();                 // render target size in pixels (512 * scale)

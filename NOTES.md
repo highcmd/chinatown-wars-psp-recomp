@@ -84,8 +84,20 @@ as fast (cutscenes, scripts, movement): the logic advances one fixed step per fr
 30 and 60 fps runs (`CTW_DUMP_MEM`) show no time-step variable (no float or integer that halves at
 60 fps), only frame counters that double, and the code holds no 1/30 s, 33 ms or 16.7 ms constant; the only
 millisecond clock (0x08BF1DD0) follows real time. The engine is the DS game's fixed-point, frame-locked
-design. Real 60 fps would need in-between frames (e.g. interpolating transforms between two game
-frames), not a patch.
+design, so 60 fps comes from in-between frames instead (`fps = 60`, ge_gl.cpp):
+- With interpolation on, `gl_ge_draw` records each draw (state, its texture resolved to a GL texture,
+  clip-space vertices) instead of executing it. A texture whose pixels change after a recorded draw used
+  it gets a new GL texture, so every recorded draw keeps its picture.
+- At FINISH the frame runs twice. First every draw that has a partner in the previous frame (same
+  texture, vertex count and target stride, n-th occurrence of that key) gets its vertices halfway
+  between the two frames; partners whose screen positions moved more than half the screen are refused
+  (camera cuts, a different object). Every target drawn is then copied to its `midTex`. Then the frame
+  runs as recorded, so all targets end in their real state.
+- The present thread shows a target's `midTex` at the first vblank after the game flips to it and the
+  real picture at the next one: 60 pictures per second, one 60 Hz frame of extra latency.
+- The target address is not part of the key: the game alternates two display buffers. 86-95 % of the
+  draws find a partner in the first mission; the others (new objects, some shadow volumes) are drawn at
+  their new position.
 
 ## Window and hotkeys
 - The hidden window that holds the GE's GL context keeps SDL from sending SDL_QUIT when the game window

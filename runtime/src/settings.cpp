@@ -22,7 +22,7 @@ static bool apply_setting(const std::string &k, const std::string &v) {
 	Settings &s = g_settings;
 	if (k == "fps") {
 		int f = atoi(v.c_str());
-		if (f != 30 && f != 60 && f != 120) { fprintf(stderr, "fps must be 30, 60 or 120\n"); return false; }
+		if (f != 30 && f != 60) { fprintf(stderr, "fps must be 30 or 60\n"); return false; }
 		s.fps = f;
 	} else if (k == "resolution" || k == "res") {
 		if (!parse_res(v, s.width, s.height)) { fprintf(stderr, "resolution must be WxH, e.g. 1920x1088\n"); return false; }
