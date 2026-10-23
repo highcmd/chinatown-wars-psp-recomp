@@ -241,6 +241,22 @@ class FuncGen:
 
     # --- non-branch instructions -----------------------------------------
     def gen_simple(self, a, w):
+        patch = self.rc.patches.get(a)
+        if patch is None:
+            return self.gen_body(a, w)
+        bit, alt = patch
+        if alt.startswith("call:"):
+            fn = alt[5:]
+            self.emit(f"{{ void {fn}(CPUState *); {fn}(c); }}  /* cheat patch at {a:#x} */")
+            return
+        save, self.out = self.out, []
+        self.gen_body(a, w)
+        orig, self.out = self.out, save
+        self.emit(f"if (!(g_cheats & {1 << bit:#x}u)) {{  /* cheat patch at {a:#x} */")
+        self.out += ["\t" + x for x in orig]
+        self.emit("}")
+
+    def gen_body(self, a, w):
         op = w >> 26
         rs, rt, rd, sa = (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31, (w >> 6) & 31
         imm, simm = w & 0xFFFF, s16(w & 0xFFFF)
@@ -414,6 +430,13 @@ class Recompiler:
         self.imports = main.img.imports if main else img.imports
         self.vfpu_used = main.vfpu_used if main else set()
         self.hooks = {}
+        self.patches = {}   # address -> (cheat bit, "nop" | "call:fn"), data/cheats.json
+        cheats_path = ROOT / "data" / "cheats.json"
+        if main is None and cheats_path.exists():
+            for k, ch in json.load(open(cheats_path)).items():
+                if not k.startswith("_"):
+                    for a, alt in ch["patches"].items():
+                        self.patches[int(a, 16)] = (ch["bit"], alt)
         if main is None:
             hooks_path = ROOT / "data" / "hooks.json"
             hooks = json.load(open(hooks_path)) if hooks_path.exists() else {}

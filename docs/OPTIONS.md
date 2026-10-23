@@ -29,6 +29,8 @@ In `ctw.ini`, write `key = value`, one per line; `#` starts a comment. On the co
 | `vsync` | `--vsync` | `true`/`false` | `false` | sync presentation to the monitor refresh rate |
 | `deadzone` | `--deadzone N` | `0`–`32767` | `8000` | left-stick deadzone; raise it if the rider drifts |
 | `right_stick_dpad` | `--right-stick-dpad` | `true`/`false` | `false` | the right stick also works as the D-pad (menus) |
+| `third_person_camera` | `--third-person-camera` | `true`/`false` | `false` | start with the third-person camera; F1 toggles it while playing |
+| `camera_height` | `--camera-height N` | 1000..200000 | `15000` | height of the third-person camera (the game's own top-down camera is ~111700) |
 | `pad_mapping` | `--pad-mapping STR` | SDL mapping line | none | adds a mapping for a pad SDL doesn't know, see [Gamepads](#gamepads) |
 | `iso` | `--iso FILE` | path | see [Paths](#paths) | your UMD image |
 | `key_<button>` | none | key names | see [Remapping](#remapping) | keyboard keys for a PSP button |
@@ -117,6 +119,7 @@ Tested with a wired Xbox 360 pad (in SSX On Tour, which shares this runtime).
 | Start | Start | Enter |
 | Select | Back | Backspace or right Shift |
 | none | none | F11 = toggle fullscreen |
+| none | none | F1 = toggle the third-person camera |
 
 Keyboard and pads can be used at the same time.
 

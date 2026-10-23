@@ -49,6 +49,8 @@ static bool apply_setting(const std::string &k, const std::string &v) {
 	else if (k == "right_stick_dpad") s.rightStickAsDpad = parse_bool(v);
 	else if (k == "pad_mapping") s.padMapping = v;
 	else if (k == "iso") s.isoPath = v;
+	else if (k == "third_person_camera") s.thirdPerson = parse_bool(v);
+	else if (k == "camera_height") s.cameraHeight = std::max(1000, std::min(200000, atoi(v.c_str())));
 	else if (k.rfind("key_", 0) == 0 || k.rfind("pad_", 0) == 0) s.bindings[k] = v;
 	else return false;
 	return true;
@@ -77,9 +79,9 @@ bool settings_parse_arg(int argc, char **argv, int &i) {
 	if (a.rfind("--", 0) != 0) return false;
 	std::string k = a.substr(2);
 	for (auto &ch : k) if (ch == '-') ch = '_';
-	if (k == "fullscreen" || k == "vsync" || k == "right_stick_dpad") return apply_setting(k, "1");
+	if (k == "fullscreen" || k == "vsync" || k == "right_stick_dpad" || k == "third_person_camera") return apply_setting(k, "1");
 	if (k == "windowed") { g_settings.fullscreen = false; return true; }
-	if (k == "fps" || k == "renderer" || k == "render_scale" || k == "res" || k == "resolution" || k == "scale" || k == "filter" || k == "deadzone" || k == "pad_mapping" || k == "refresh") {
+	if (k == "fps" || k == "renderer" || k == "render_scale" || k == "res" || k == "resolution" || k == "scale" || k == "filter" || k == "deadzone" || k == "pad_mapping" || k == "refresh" || k == "camera_height") {
 		if (i + 1 >= argc) return false;
 		return apply_setting(k, argv[++i]);
 	}
@@ -103,7 +105,8 @@ const char *settings_usage() {
 	       "  --refresh HZ             with --fullscreen: switch the monitor to --res at HZ (0 = keep the desktop mode)\n"
 	       "  --filter linear|nearest  scaling filter for the final picture; --vsync\n"
 	       "  --deadzone N             gamepad stick deadzone 0..32767 (default 8000); --right-stick-dpad\n"
+	       "  --third-person-camera    start with the third-person camera (F1 toggles it); --camera-height N (default 15000)\n"
 	       "  --pad-mapping STR        extra SDL GameControllerDB mapping line for an unknown pad\n"
 	       "  every setting can also go in ./ctw.ini as key = value (resolution, scale, renderer, render_scale,\n"
-	       "  fullscreen, refresh, filter, vsync, deadzone, right_stick_dpad, pad_mapping, iso); flags override the file. See docs/OPTIONS.md\n";
+	       "  fullscreen, refresh, filter, vsync, deadzone, right_stick_dpad, pad_mapping, third_person_camera, camera_height, iso); flags override the file. See docs/OPTIONS.md\n";
 }

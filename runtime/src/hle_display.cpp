@@ -13,6 +13,11 @@
 #include "settings.h"
 
 static SDL_Window *s_win;
+
+static const char *window_title() {
+	return g_cheats & 1u ? "GTA: Chinatown Wars (recompiled) - third-person camera (F1)"
+	                      : "GTA: Chinatown Wars (recompiled)";
+}
 static SDL_Renderer *s_ren;
 static SDL_Texture *s_tex;
 static u32 s_vcount;
@@ -85,7 +90,8 @@ void display_init(bool headless) {
 		SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
 		flags |= SDL_WINDOW_OPENGL | (headless ? SDL_WINDOW_HIDDEN : 0);
 	}
-	s_win = SDL_CreateWindow("GTA: Chinatown Wars (recompiled)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, st.width, st.height, flags);
+	g_cheats = st.thirdPerson ? 1u : 0u;
+	s_win = SDL_CreateWindow(window_title(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, st.width, st.height, flags);
 	if (s_win && exclusive && !headless) enter_fullscreen();
 	if (wantGL && s_win && gl_display_init(s_win, headless, st.vsync, st.linear)) {
 		s_gl = true;
@@ -364,6 +370,11 @@ void display_pump_events() {
 					s_pads.erase(s_pads.begin() + i);
 					break;
 				}
+		}
+		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F1) {
+			g_cheats ^= 1u;   // third-person camera (data/cheats.json, game_hooks.cpp)
+			rt_log(LOG_DISPLAY, "third-person camera %s", g_cheats & 1u ? "on" : "off");
+			SDL_SetWindowTitle(s_win, window_title());
 		}
 		if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) {
 			if (SDL_GetWindowFlags(s_win) & SDL_WINDOW_FULLSCREEN) SDL_SetWindowFullscreen(s_win, 0);

@@ -66,6 +66,17 @@ launcher). These notes cover what this game needed on top of those.
   CpuResumeIntrWithSync, `ms0:/PSP/SAVEDATA` created at start (the game probes ms0: before saving).
 - `vsync2` (VFPU) is a no-op like `vsync`.
 
+## Cheats: third-person camera (F1)
+`data/cheats.json` lists instructions of BOOT.BIN that the recompiler wraps in a test of a `g_cheats`
+bit (`"nop"`: skipped while the cheat is on) or replaces by a call into `game_hooks.cpp` (`"call:fn"`).
+The third-person camera follows Dark_Timur's ArtMoney table for PPSSPP (2015, "GTA San Andreas-like
+camera"); its addresses match this v1.01 executable word for word:
+- 46 stores of the camera height (+0x108 of the camera object) are skipped;
+- `lh a0, 0x12C(s0)` in the view-matrix builder F_088559AC (the pitch) gives 0, and the same hook
+  holds the height at `camera_height` (15000; the game uses ~111700) and puts 111700 back when F1
+  turns it off.
+Cutscene cameras are affected too while it is on, as in the original cheat.
+
 ## Known issues
 - The CPU renderer draws the bloom wrong (bright horizontal streaks): its render-to-texture of the
   0x04110000/0x04132000 buffers with changing strides doesn't match. The GPU renderer is right.

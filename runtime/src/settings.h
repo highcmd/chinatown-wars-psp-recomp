@@ -16,6 +16,8 @@ struct Settings {
 	int deadzone = 8000;       // gamepad stick deadzone (0..32767)
 	bool rightStickAsDpad = false;
 	std::string padMapping;    // optional SDL_GameControllerDB line
+	bool thirdPerson = false;  // start with the third-person camera cheat on (F1 toggles)
+	int cameraHeight = 15000;  // its camera height (game units; the game's own is ~111700)
 	std::string isoPath;       // UMD image (ctw.ini 'iso'; --iso on the command line)
 	// Input bindings: "key_cross" -> "Z" (SDL scancode names), "pad_cross" -> "a" (SDL
 	// game controller button names, plus lefttrigger/righttrigger). Comma = several.

@@ -58,6 +58,8 @@ Working (compared with the same ISO in PPSSPP):
 - the GPU renderer at up to 2880×1632 internal resolution, with the game's stencil shadows and bloom
 - the keyboard and gamepads, including remapping
 - the memory stick: the game finds it and turns auto-save on
+- optional third-person camera: **F1** toggles it (`third_person_camera`, `camera_height` in ctw.ini);
+  from Dark_Timur's ArtMoney cheat for PPSSPP, so like the original it also moves cutscene cameras
 
 Not done yet, or not checked:
 - full play-throughs: the game was tested through the opening of the first mission

@@ -59,6 +59,7 @@ extern const u32 g_ctors_addr, g_ctors_size;
 
 // --- runtime services ---
 extern u8 *g_mem;
+extern u32 g_cheats;   // bits of data/cheats.json, toggled by hotkeys (game_hooks.cpp)
 void rt_call(CPUState *c, u32 addr);
 [[noreturn]] void rt_unhandled(CPUState *c, u32 pc, const char *what);
 void rt_break(CPUState *c, u32 pc);
