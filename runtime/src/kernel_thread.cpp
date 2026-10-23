@@ -1289,6 +1289,18 @@ HLE(Kernel_Library, sceKernelCpuResumeIntrWithSync) { RET(0); }
 // a fresh fiber that re-enters its chain of calls (recomp.h) and makes that HLE call again.
 bool rt_is_import_stub(u32 addr);
 
+// The running thread's calls (shadow stack), innermost last: for crash reports.
+void kernel_log_call_chain() {
+	if (!s_cur) return;
+	std::string b;
+	char t[24];
+	for (u32 *p = s_cur->ss.data(); p < g_ssp; p += 2) {
+		snprintf(t, sizeof t, " %08x>%08x", p[0], p[1]);
+		b += t;
+	}
+	rt_log(LOG_RT, "calls (site>target):%s", b.c_str());
+}
+
 std::string kernel_thread_save_blocker() {
 	for (auto &[id, t] : s_threads) {
 		if (t->status == Thread::DORMANT) continue;

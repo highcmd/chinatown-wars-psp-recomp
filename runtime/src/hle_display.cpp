@@ -220,8 +220,8 @@ void display_present() {
 
 // Scripted input for headless testing: CTW_INPUT="16=start,20.5=cross+down,30=cross:1.0"
 // (time in seconds = buttons joined by '+', optional :duration, default 0.15 s)
-// "nup ndown nleft nright" push the analog nub to its edge.
-enum : u32 { SCRIPT_NUB_UP = 1u << 28, SCRIPT_NUB_DOWN = 1u << 29, SCRIPT_NUB_LEFT = 1u << 30, SCRIPT_NUB_RIGHT = 1u << 31 };
+// "nup ndown nleft nright" push the analog nub to its edge; "f1" toggles the third-person camera.
+enum : u32 { SCRIPT_F1 = 1u << 27, SCRIPT_NUB_UP = 1u << 28, SCRIPT_NUB_DOWN = 1u << 29, SCRIPT_NUB_LEFT = 1u << 30, SCRIPT_NUB_RIGHT = 1u << 31 };
 struct ScriptedPress { double t, dur; u32 buttons; };
 static std::vector<ScriptedPress> s_script;
 static void parse_script() {
@@ -233,7 +233,7 @@ static void parse_script() {
 	static const struct { const char *n; u32 b; } names[] = {
 		{"select", 0x1}, {"start", 0x8}, {"up", 0x10}, {"right", 0x20}, {"down", 0x40}, {"left", 0x80},
 		{"l", 0x100}, {"r", 0x200}, {"triangle", 0x1000}, {"circle", 0x2000}, {"cross", 0x4000}, {"square", 0x8000},
-		{"nup", SCRIPT_NUB_UP}, {"ndown", SCRIPT_NUB_DOWN}, {"nleft", SCRIPT_NUB_LEFT}, {"nright", SCRIPT_NUB_RIGHT}};
+		{"nup", SCRIPT_NUB_UP}, {"ndown", SCRIPT_NUB_DOWN}, {"nleft", SCRIPT_NUB_LEFT}, {"nright", SCRIPT_NUB_RIGHT}, {"f1", SCRIPT_F1}};
 	std::string str = e;
 	size_t i = 0;
 	while (i < str.size()) {
@@ -331,7 +331,10 @@ static void update_buttons() {
 	if (b & SCRIPT_NUB_DOWN) analog |= AN_DOWN;
 	if (b & SCRIPT_NUB_LEFT) analog |= AN_LEFT;
 	if (b & SCRIPT_NUB_RIGHT) analog |= AN_RIGHT;
-	b &= 0xFFFFFFF;
+	static bool f1;
+	if ((b & SCRIPT_F1) && !f1) g_cheats ^= 1u;   // F1: third-person camera
+	f1 = (b & SCRIPT_F1) != 0;
+	b &= 0x7FFFFFF;
 	static bool bound;
 	if (!s_headless && !bound) { build_bindings(); bound = true; }
 	const Uint8 *k = s_headless ? nullptr : SDL_GetKeyboardState(nullptr);

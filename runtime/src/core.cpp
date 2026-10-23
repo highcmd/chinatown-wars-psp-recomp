@@ -273,6 +273,8 @@ bool rt_is_function(u32 addr) {
 
 void rt_unhandled(CPUState *c, u32 pc, const char *what) {
 	rt_log_error("FATAL: %s at %08x (ra=%08x sp=%08x)", what, pc, c->r[31], c->r[29]);
+	void kernel_log_call_chain();
+	kernel_log_call_chain();
 	kernel_dump_threads();
 	fflush(stderr);
 	_exit(2);
@@ -373,7 +375,10 @@ void install_hle_by_name(const char *lib, const char *name, HLEFunc fn) { regist
 u32 g_watch = getenv("CTW_WATCH") ? (u32)strtoul(getenv("CTW_WATCH"), nullptr, 16) & 0x1FFFFFFCu : 1;
 void rt_watch_hit(u32 a, u32 v) {
 	static int n;
+	static double after = getenv("CTW_WATCH_AFTER") ? atof(getenv("CTW_WATCH_AFTER")) : 0;
+	if (rt_time_us() / 1e6 < after) return;
 	if (n++ > 40) return;
+	{ void kernel_log_call_chain(); kernel_log_call_chain(); }
 	CPUState *c = kernel_current_ctx();
 	rt_log(LOG_RT, "watch %08x <- %08x (ra %08x)", a, v, c ? c->r[31] : 0);
 	if (c) rt_log_backtrace(c, 64);

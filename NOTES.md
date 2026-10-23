@@ -89,6 +89,33 @@ recorded call site, makes that call and continues after it; the innermost call i
 call, made again (its wait starts afresh). The guest clock continues from the saved time.
 Not possible while a video plays. Timers are rebuilt (vblank, alarms).
 
+## Draw distance in the third-person view (streamed city)
+- Not the far plane (camera +0x60, 150 units) nor the frustum test: changing either draws the
+  same picture. The city is not in memory: the streaming manager (0x08C12000, update F_089F4754)
+  keeps a 3x3 grid of 60-unit tiles (nine 0x764-byte slots inside the manager, slot (x%3, y%3);
+  four 0x67800-byte buffers for the 120x120 sector files a tile shows a quarter of) around the
+  point where the camera looks at the ground, at most 64 units ahead. The level third-person
+  camera has no such point and the game centres on the camera: the city ended 60-120 units ahead.
+- Done: while the camera looks level, `tpcam_stream_ahead` (game_hooks.cpp) shows the update a
+  camera one tile further along the view, as the top-down camera does; 120-180 units ahead.
+- Tried and dropped: a 5x5 grid (manager functions rewritten in C++, slots/buffers in the kernel
+  area 0x08000000-0x08800000; patch kept outside the repo). Each step uncovered another place
+  where the game assumes at most 2x2 sector files at once:
+  - every sector file takes 9.5 + 32 KB of the main heap (F_089F180C, F_089F18A4); the heap has
+    ~250 KB free in town, and vehicle models then fail to load (null vtable call in F_089F7788);
+  - the per-frame display list (two 0x99000-byte buffers, table 0x08B58FBC, end set at
+    0x0890D3E8) fills to ~500 KB and overflows into the pools behind it (black screen, the GE
+    running garbage for seconds);
+  - F_089D495C takes from a pool without an empty check (sector objects 0x08D57E98 sized from the
+    world data);
+  - world objects are indexed by an 11-bit index inside their sector file (F_089F357C /
+    F_089F35F0, array at manager +0x4454) that is unique only across 2x2 files; with 3x3 files an
+    object of one file is used for another and, once its file is unloaded, draws from a buffer
+    that now holds another file (primitives of 19148 vertices, seconds per frame). Splitting the
+    array per file position was not enough.
+- Debug aids from this: `CTW_INPUT` takes `f1`; a FATAL error logs the guest call chain (shadow
+  stack); `CTW_WATCH_AFTER=seconds` delays a CTW_WATCH build's store log.
+
 ## 60 fps: why the game stays at 30
 F_0890D53C ends each frame with `while (vblanks since the last flip < 2) sceDisplayWaitVblankStart()`
 (`sltiu a0,a0,2` at 0x0890D680). Comparing with 1 does give 60 fps, but the whole game then runs twice
