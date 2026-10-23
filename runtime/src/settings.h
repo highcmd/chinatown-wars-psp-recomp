@@ -19,6 +19,7 @@ struct Settings {
 	bool showFps = false;      // FPS meter at start (F2 toggles)
 	bool thirdPerson = false;  // start with the third-person camera cheat on (F1 toggles)
 	int cameraHeight = 15000;  // its camera height (game units; the game's own is ~111700)
+	int hudScale = 100;        // HUD size in percent: 100, 75 or 50 (F3 cycles; ge_render.cpp)
 	std::string isoPath;       // UMD image (ctw.ini 'iso'; --iso on the command line)
 	// Input bindings: "key_cross" -> "Z" (SDL scancode names), "pad_cross" -> "a" (SDL
 	// game controller button names, plus lefttrigger/righttrigger). Comma = several.
@@ -28,6 +29,8 @@ struct Settings {
 extern Settings g_settings;
 int settings_render_scale();   // resolved scale (1..6)
 void settings_load(const char *path);
+// Writes one key into an ini file: replaces its line, or appends one.
+void settings_store(const char *path, const std::string &key, const std::string &value);
 // Returns false on an unknown option; i is advanced past consumed arguments.
 bool settings_parse_arg(int argc, char **argv, int &i);
 const char *settings_usage();

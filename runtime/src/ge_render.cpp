@@ -21,6 +21,7 @@
 
 #include "ge_gl.h"
 #include "kernel.h"
+#include "settings.h"
 
 // ============================================================ state
 static u32 R[256];                     // last value of every command (24-bit payload)
@@ -1429,6 +1430,100 @@ static void clip_and_draw_slow(Vtx a, Vtx b, Vtx c, bool cullOn, int cullCCW) {
 	for (int i = 1; i + 1 < n; i++) emit_triangle(in[0], in[i], in[i + 1], c);
 }
 
+// HUD size (hud_scale, F3). The HUD is 2D drawing into the display buffer: this game uses an
+// orthographic projection (the same w, 2048, at every vertex; the minimap masks itself with the
+// depth test), through mode counts too. Each element shrinks towards the corner, edge or centre
+// of the screen it is nearest to (thirds of the screen), so it stays where the game put it, only
+// smaller. An element is many primitives (a box in pieces, its text glyph run by glyph run), so
+// primitives that overlap are merged into elements each frame, and a primitive takes the anchor
+// of the element it belonged to in the previous frame (the HUD hardly moves between frames).
+// Full-screen primitives (fades, menu backgrounds), elements covering most of the screen
+// (menus over the game), frames without a 3D scene (the PDA, pause and map screens), clears and
+// other render targets are left alone; the scissor moves with the element.
+bool display_is_frame_buffer(u32 addr);   // hle_display.cpp
+extern u64 g_frames_finished;
+
+namespace {
+struct HudBox { float x0, y0, x1, y1; };
+std::vector<HudBox> s_hud_cur, s_hud_prev;   // elements of this frame and of the last one
+u64 s_hud_frame = ~0ull;
+unsigned s_hud_3d, s_hud_3d_prev;              // 3D primitives in the display buffer
+
+void hud_add(HudBox b) {
+	for (size_t i = 0; i < s_hud_cur.size();) {   // merge every element it overlaps
+		HudBox &g = s_hud_cur[i];
+		// a real overlap (a fifth of the smaller one), not neighbours touching at an edge
+		float ox = std::min(b.x1, g.x1) - std::max(b.x0, g.x0), oy = std::min(b.y1, g.y1) - std::max(b.y0, g.y0);
+		auto area = [](const HudBox &h) { return std::max(h.x1 - h.x0, 1.0f) * std::max(h.y1 - h.y0, 1.0f); };
+		if (ox > 0 && oy > 0 && ox * oy >= 0.2f * std::min(area(b), area(g))) {
+			b = {std::min(b.x0, g.x0), std::min(b.y0, g.y0), std::max(b.x1, g.x1), std::max(b.y1, g.y1)};
+			s_hud_cur.erase(s_hud_cur.begin() + i);
+			i = 0;
+		} else i++;
+	}
+	s_hud_cur.push_back(b);
+}
+
+bool pow2(float w) {
+	if (w < 64 || w > 65536 || w != floorf(w)) return false;
+	unsigned u = (unsigned)w;
+	return (u & (u - 1)) == 0;
+}
+}  // namespace
+
+static void hud_scale(std::vector<Vtx> &vs, int count, bool through) {
+	float s = g_settings.hudScale / 100.0f;
+	if (s >= 1 || P.clear || !count || !display_is_frame_buffer(P.tgt.vfb)) return;
+	if (s_hud_frame != g_frames_finished) {
+		s_hud_frame = g_frames_finished;
+		s_hud_3d_prev = s_hud_3d;
+		s_hud_3d = 0;
+		s_hud_prev.swap(s_hud_cur);
+		s_hud_cur.clear();
+	}
+	if (!through) {
+		bool flat = pow2(vs[0].w);
+		for (int i = 1; i < count && flat; i++) flat = vs[i].w == vs[0].w;
+		if (!flat) { s_hud_3d++; return; }
+	}
+	if (!s_hud_3d_prev) return;   // no 3D scene: a full-screen menu (PDA, pause), left alone
+	const float S = (float)g_render_scale;
+	HudBox b{1e9f, 1e9f, -1e9f, -1e9f};
+	for (int i = 0; i < count; i++) {
+		b.x0 = std::min(b.x0, vs[i].sx / S); b.x1 = std::max(b.x1, vs[i].sx / S);
+		b.y0 = std::min(b.y0, vs[i].sy / S); b.y1 = std::max(b.y1, vs[i].sy / S);
+	}
+	if (b.x1 - b.x0 >= 432 && b.y1 - b.y0 >= 245) return;   // full screen
+	// what it can cover: the screen, and the depth mask a masked primitive is drawn through
+	// (the minimap draws its map tiles far beyond the circle it wrote into the depth buffer)
+	static HudBox mask{0, 0, 480, 272};
+	HudBox a = {std::max(b.x0, 0.0f), std::max(b.y0, 0.0f), std::min(b.x1, 480.0f), std::min(b.y1, 272.0f)};
+	if (P.depthTest && P.zFunc != 7) a = {std::max(a.x0, mask.x0), std::max(a.y0, mask.y0), std::min(a.x1, mask.x1), std::min(a.y1, mask.y1)};
+	else if (P.zWrite) mask = a;   // written with the test passing always: a mask
+	bool onScreen = a.x0 < a.x1 && a.y0 < a.y1;
+	if (onScreen) b = a;
+	if (onScreen) hud_add(b);
+	HudBox e = b;   // the element: last frame's, else what this frame has so far
+	float cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+	bool found = false;
+	for (auto &g : s_hud_prev)
+		if (cx >= g.x0 && cx <= g.x1 && cy >= g.y0 && cy <= g.y1) { e = g; found = true; break; }
+	if (!found)
+		for (auto &g : s_hud_cur)
+			if (cx >= g.x0 && cx <= g.x1 && cy >= g.y0 && cy <= g.y1) { e = g; break; }
+	if (e.x1 - e.x0 > 400 && e.y1 - e.y0 > 200) return;   // a menu over the game: left alone
+	float ex = (e.x0 + e.x1) / 2, ey = (e.y0 + e.y1) / 2;
+	float ax = ex < 160 ? 0.0f : ex > 320 ? 480.0f : 240.0f, ay = ey < 91 ? 0.0f : ey > 181 ? 272.0f : 136.0f;
+	auto mx = [&](float x) { return (ax + (x / S - ax) * s) * S; };
+	auto my = [&](float y) { return (ay + (y / S - ay) * s) * S; };
+	for (int i = 0; i < count; i++) { vs[i].sx = mx(vs[i].sx); vs[i].sy = my(vs[i].sy); }
+	int W = 480 * g_render_scale, H = 272 * g_render_scale;
+	if (P.sx0 > 0 || P.sy0 > 0 || P.sx1 < W - 1 || P.sy1 < H - 1) {
+		P.sx0 = (int)floorf(mx((float)P.sx0)); P.sx1 = (int)ceilf(mx((float)P.sx1 + 1)) - 1;
+		P.sy0 = (int)floorf(my((float)P.sy0)); P.sy1 = (int)ceilf(my((float)P.sy1 + 1)) - 1;
+	}
+}
+
 static void draw_prim(u32 op) {
 	int type = (op >> 16) & 7;
 	int count = op & 0xFFFF;
@@ -1462,6 +1557,7 @@ static void draw_prim(u32 op) {
 	if (!f.through)
 		for (int i = 0; i < count; i++)
 			if (vs[i].z + vs[i].w >= 0) to_screen(vs[i]);
+	hud_scale(vs, count, f.through);
 	if (idxSize) s_iaddr += count * idxSize;
 	else s_vaddr += count * f.size * f.nm;
 

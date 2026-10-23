@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "hle.h"
 #include <SDL2/SDL.h>
@@ -52,6 +53,7 @@ static bool apply_setting(const std::string &k, const std::string &v) {
 	else if (k == "show_fps") s.showFps = parse_bool(v);
 	else if (k == "third_person_camera") s.thirdPerson = parse_bool(v);
 	else if (k == "camera_height") s.cameraHeight = std::max(1000, std::min(200000, atoi(v.c_str())));
+	else if (k == "hud_scale") { int n = atoi(v.c_str()); s.hudScale = n >= 100 ? 100 : n >= 75 ? 75 : 50; }
 	else if (k.rfind("key_", 0) == 0 || k.rfind("pad_", 0) == 0) s.bindings[k] = v;
 	else return false;
 	return true;
@@ -75,6 +77,29 @@ void settings_load(const char *path) {
 	}
 }
 
+void settings_store(const char *path, const std::string &key, const std::string &value) {
+	std::vector<std::string> lines;
+	bool done = false;
+	{
+		std::ifstream f(path);
+		std::string line;
+		while (std::getline(f, line)) {
+			size_t a = line.find_first_not_of(" \t");
+			if (!done && a != std::string::npos && line.compare(a, key.size(), key) == 0) {
+				size_t b = line.find_first_not_of(" \t", a + key.size());
+				if (b != std::string::npos && line[b] == '=') {
+					line = key + " = " + value;
+					done = true;
+				}
+			}
+			lines.push_back(line);
+		}
+	}
+	if (!done) lines.push_back(key + " = " + value);
+	std::ofstream f(path, std::ios::trunc);
+	for (auto &l : lines) f << l << "\n";
+}
+
 bool settings_parse_arg(int argc, char **argv, int &i) {
 	std::string a = argv[i];
 	if (a.rfind("--", 0) != 0) return false;
@@ -82,7 +107,7 @@ bool settings_parse_arg(int argc, char **argv, int &i) {
 	for (auto &ch : k) if (ch == '-') ch = '_';
 	if (k == "fullscreen" || k == "vsync" || k == "right_stick_dpad" || k == "third_person_camera" || k == "show_fps") return apply_setting(k, "1");
 	if (k == "windowed") { g_settings.fullscreen = false; return true; }
-	if (k == "fps" || k == "renderer" || k == "render_scale" || k == "res" || k == "resolution" || k == "scale" || k == "filter" || k == "deadzone" || k == "pad_mapping" || k == "refresh" || k == "camera_height") {
+	if (k == "fps" || k == "renderer" || k == "render_scale" || k == "res" || k == "resolution" || k == "scale" || k == "filter" || k == "deadzone" || k == "pad_mapping" || k == "refresh" || k == "camera_height" || k == "hud_scale") {
 		if (i + 1 >= argc) return false;
 		return apply_setting(k, argv[++i]);
 	}
@@ -107,8 +132,9 @@ const char *settings_usage() {
 	       "  --filter linear|nearest  scaling filter for the final picture; --vsync\n"
 	       "  --deadzone N             gamepad stick deadzone 0..32767 (default 8000); --right-stick-dpad\n"
 	       "  --third-person-camera    start with the third-person camera (F1 toggles it); --camera-height N (default 15000)\n"
+	       "  --hud-scale N            HUD size in percent: 100 (default), 75 or 50; F3 cycles it\n"
 	       "  --show-fps               FPS meter in the top-left corner (F2 toggles)\n"
 	       "  --pad-mapping STR        extra SDL GameControllerDB mapping line for an unknown pad\n"
 	       "  every setting can also go in ./ctw.ini as key = value (resolution, scale, renderer, render_scale,\n"
-	       "  fullscreen, refresh, filter, vsync, deadzone, right_stick_dpad, pad_mapping, show_fps, third_person_camera, camera_height, iso); flags override the file. See docs/OPTIONS.md\n";
+	       "  fullscreen, refresh, filter, vsync, deadzone, right_stick_dpad, pad_mapping, show_fps, third_person_camera, camera_height, hud_scale, iso); flags override the file. See docs/OPTIONS.md\n";
 }

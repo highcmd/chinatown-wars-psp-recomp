@@ -32,6 +32,7 @@ In `ctw.ini`, write `key = value`, one per line; `#` starts a comment. On the co
 | `show_fps` | `--show-fps` | `true`/`false` | `false` | FPS meter in the top-left corner; F2 toggles it while playing |
 | `third_person_camera` | `--third-person-camera` | `true`/`false` | `false` | start with the third-person camera; F1 toggles it while playing |
 | `camera_height` | `--camera-height N` | 1000..200000 | `15000` | height of the third-person camera (the game's own top-down camera is ~111700) |
+| `hud_scale` | `--hud-scale N` | `100`, `75`, `50` | `100` | HUD size in percent: each element shrinks towards its corner or edge of the screen; F3 cycles it while playing (and saves it here). Full-screen menus (PDA, pause, map) keep their size |
 | `pad_mapping` | `--pad-mapping STR` | SDL mapping line | none | adds a mapping for a pad SDL doesn't know, see [Gamepads](#gamepads) |
 | `iso` | `--iso FILE` | path | see [Paths](#paths) | your UMD image |
 | `key_<button>` | none | key names | see [Remapping](#remapping) | keyboard keys for a PSP button |
@@ -128,6 +129,7 @@ Tested with a wired Xbox 360 pad (in SSX On Tour, which shares this runtime).
 | none | none | F11 = toggle fullscreen |
 | none | none | F1 = toggle the third-person camera |
 | none | none | F2 = show/hide the FPS meter |
+| none | none | F3 = HUD size 100 % → 75 % → 50 % (kept in `ctw.ini` as `hud_scale`) |
 | none | none | F5 = quick save (a savestate in `savestates/quick1.ctwstate`) |
 | none | none | F9 = quick load |
 | none | none | window close button / Alt+F4 = quit |
@@ -221,7 +223,7 @@ These are for development. A normal player never needs them.
 | `CTW_DUMP_MEM` | `CTW_DUMP_MEM=1` | with `CTW_SHOT_EVERY`: user RAM (0x08800000, 24 MB) to `mem_NNN.bin` next to each screenshot |
 | `CTW_WATCH` | `CTW_WATCH=08C1F604` | only in a build with `-DCMAKE_CXX_FLAGS=-DCTW_WATCH`: log the first stores to that address with a guest backtrace and call chain; `CTW_WATCH_AFTER=212` starts logging at 212 s |
 | `CTW_SHOT_EVERY` | `CTW_SHOT_EVERY=5` | write a screenshot every 5 s |
-| `CTW_INPUT` | `CTW_INPUT="16=start,20.5=cross+down,30=cross:1.0"` | scripted button presses: `seconds=buttons[:duration]` (buttons: `cross circle square triangle up down left right l r start select`, and `nup ndown nleft nright` for the analog nub, `f1` for the camera key) |
+| `CTW_INPUT` | `CTW_INPUT="16=start,20.5=cross+down,30=cross:1.0"` | scripted button presses: `seconds=buttons[:duration]` (buttons: `cross circle square triangle up down left right l r start select`, and `nup ndown nleft nright` for the analog nub, `f1` / `f3` for those keys) |
 | `CTW_LOAD_STATE` | `CTW_LOAD_STATE=a.ctwstate` | load a savestate as soon as the game boots |
 | `CTW_SAVE_STATE_AT` | `CTW_SAVE_STATE_AT=110` | save a state at 110 s (to `CTW_SAVE_STATE_FILE`, default the F5 slot) |
 | `CTW_GETRACE_AT` | `CTW_GETRACE_AT=40` | dump one frame of GE commands at 40 s |

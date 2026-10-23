@@ -116,6 +116,18 @@ Not possible while a video plays. Timers are rebuilt (vblank, alarms).
 - Debug aids from this: `CTW_INPUT` takes `f1`; a FATAL error logs the guest call chain (shadow
   stack); `CTW_WATCH_AFTER=seconds` delays a CTW_WATCH build's store log.
 
+## HUD size (F3, hud_scale)
+- The HUD is not through-mode: it is drawn with an orthographic projection (w = 2048 at every
+  vertex), mostly without the depth test; the minimap writes a circle into the depth buffer
+  (depth func ALWAYS) and draws its map tiles, far larger than the circle, through it.
+- `hud_scale` in ge_render.cpp (draw_prim, both renderers) moves the screen positions of such
+  primitives in the display buffer towards an anchor (corner, edge midpoint or centre, by thirds
+  of the screen) and the scissor with them. Primitives that overlap by at least a fifth of the
+  smaller one form an element (box pieces, glyph runs, icons); bounds are clipped to the screen
+  and, for masked primitives, to the last mask. A primitive takes the anchor of the element it
+  was part of in the previous frame, so a whole tooltip box moves as one.
+- Left alone: frames without 3D (PDA, pause, map), elements over 400x200, full-screen quads.
+
 ## 60 fps: why the game stays at 30
 F_0890D53C ends each frame with `while (vblanks since the last flip < 2) sceDisplayWaitVblankStart()`
 (`sltiu a0,a0,2` at 0x0890D680). Comparing with 1 does give 60 fps, but the whole game then runs twice

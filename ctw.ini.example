@@ -13,4 +13,5 @@ right_stick_dpad = false
 show_fps = false             # F2 toggles it at run time
 third_person_camera = false  # F1 toggles it at run time
 camera_height = 15000        # third-person camera height (the game's own is ~111700)
+hud_scale = 100              # HUD size in percent: 100, 75 or 50 (F3 cycles it)
 # iso = D:\Games\Chinatown Wars.iso   # your UMD image, if it is not next to ctw.exe / given to setup

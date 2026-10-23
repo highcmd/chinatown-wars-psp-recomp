@@ -23,7 +23,7 @@ static const char *window_title() {
 static SDL_Renderer *s_ren;
 static SDL_Texture *s_tex;
 static u32 s_vcount;
-static u32 s_fb_addr, s_fb_width = 512, s_fb_fmt = 3;
+static u32 s_fb_addr, s_fb_prev, s_fb_width = 512, s_fb_fmt = 3;
 static u32 s_buttons;
 static u8 s_lx = 128, s_ly = 128;
 static std::vector<u32> s_rgba(480 * 272);
@@ -218,10 +218,19 @@ void display_present() {
 	SDL_RenderPresent(s_ren);
 }
 
+// F3: HUD size 100 -> 75 -> 50 -> 100 % (ge_render.cpp), kept in ctw.ini.
+static void cycle_hud_scale() {
+	int &h = g_settings.hudScale;
+	h = h >= 100 ? 75 : h >= 75 ? 50 : 100;
+	settings_store("ctw.ini", "hud_scale", std::to_string(h));
+	rt_log(LOG_DISPLAY, "HUD %d%%", h);
+	osd_message("HUD: %d%%", h);
+}
+
 // Scripted input for headless testing: CTW_INPUT="16=start,20.5=cross+down,30=cross:1.0"
 // (time in seconds = buttons joined by '+', optional :duration, default 0.15 s)
-// "nup ndown nleft nright" push the analog nub to its edge; "f1" toggles the third-person camera.
-enum : u32 { SCRIPT_F1 = 1u << 27, SCRIPT_NUB_UP = 1u << 28, SCRIPT_NUB_DOWN = 1u << 29, SCRIPT_NUB_LEFT = 1u << 30, SCRIPT_NUB_RIGHT = 1u << 31 };
+// "nup ndown nleft nright" push the analog nub to its edge; "f1" / "f3" press those keys.
+enum : u32 { SCRIPT_F3 = 1u << 26, SCRIPT_F1 = 1u << 27, SCRIPT_NUB_UP = 1u << 28, SCRIPT_NUB_DOWN = 1u << 29, SCRIPT_NUB_LEFT = 1u << 30, SCRIPT_NUB_RIGHT = 1u << 31 };
 struct ScriptedPress { double t, dur; u32 buttons; };
 static std::vector<ScriptedPress> s_script;
 static void parse_script() {
@@ -233,7 +242,7 @@ static void parse_script() {
 	static const struct { const char *n; u32 b; } names[] = {
 		{"select", 0x1}, {"start", 0x8}, {"up", 0x10}, {"right", 0x20}, {"down", 0x40}, {"left", 0x80},
 		{"l", 0x100}, {"r", 0x200}, {"triangle", 0x1000}, {"circle", 0x2000}, {"cross", 0x4000}, {"square", 0x8000},
-		{"nup", SCRIPT_NUB_UP}, {"ndown", SCRIPT_NUB_DOWN}, {"nleft", SCRIPT_NUB_LEFT}, {"nright", SCRIPT_NUB_RIGHT}, {"f1", SCRIPT_F1}};
+		{"nup", SCRIPT_NUB_UP}, {"ndown", SCRIPT_NUB_DOWN}, {"nleft", SCRIPT_NUB_LEFT}, {"nright", SCRIPT_NUB_RIGHT}, {"f1", SCRIPT_F1}, {"f3", SCRIPT_F3}};
 	std::string str = e;
 	size_t i = 0;
 	while (i < str.size()) {
@@ -334,7 +343,10 @@ static void update_buttons() {
 	static bool f1;
 	if ((b & SCRIPT_F1) && !f1) g_cheats ^= 1u;   // F1: third-person camera
 	f1 = (b & SCRIPT_F1) != 0;
-	b &= 0x7FFFFFF;
+	static bool f3;
+	if ((b & SCRIPT_F3) && !f3) cycle_hud_scale();
+	f3 = (b & SCRIPT_F3) != 0;
+	b &= 0x3FFFFFF;
 	static bool bound;
 	if (!s_headless && !bound) { build_bindings(); bound = true; }
 	const Uint8 *k = s_headless ? nullptr : SDL_GetKeyboardState(nullptr);
@@ -402,6 +414,7 @@ void display_pump_events() {
 		}
 		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F2)
 			g_osd_fps = !g_osd_fps;
+		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F3) cycle_hud_scale();
 		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F5)
 			savestate_request_save(1);   // quick save / load (savestate.cpp)
 		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F9)
@@ -462,8 +475,15 @@ void display_on_vblank() {
 // ------------------------------------------------------------- HLE
 HLE(sceDisplay, sceDisplaySetMode) { RET(0); }
 
+// The game's display buffers (it flips between two): the HUD scaling only touches these.
+bool display_is_frame_buffer(u32 addr) {
+	addr &= 0x0FFFFFFF;
+	return addr == (s_fb_addr & 0x0FFFFFFF) || addr == (s_fb_prev & 0x0FFFFFFF);
+}
+
 HLE(sceDisplay, sceDisplaySetFrameBuf) {
 	if (ARG(0)) {
+		if ((ARG(0) & 0x0FFFFFFF) != (s_fb_addr & 0x0FFFFFFF)) s_fb_prev = s_fb_addr;
 		s_fb_addr = ARG(0);
 		s_fb_width = ARG(1);
 		s_fb_fmt = ARG(2);
