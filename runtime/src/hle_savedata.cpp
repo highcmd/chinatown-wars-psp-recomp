@@ -476,6 +476,12 @@ u32 run_request(u32 p) {
 
 }  // namespace
 
+#include "savestate.h"
+void savedata_state(StateIO &s) {
+	s.tag("SAVE");
+	s.pod(s_dlg);
+}
+
 HLE(sceUtility, sceUtilitySavedataInitStart) {
 	u32 p = ARG(0);
 	if (s_dlg.status != 0 && s_dlg.status != 4) { RET(0x80110001); return; }   // already running

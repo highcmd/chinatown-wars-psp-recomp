@@ -505,3 +505,23 @@ HLE(sceAtrac3plus, sceAtracGetInternalErrorInfo) {
 	if (ARG(1)) SW(ARG(1), 0);
 	RET(atrac_get(ARG(0)) ? 0 : ATRAC_BAD_ID);
 }
+
+// ================================================================ savestates
+// Channels restart just ahead of "now" (the mixer ring is not saved); ATRAC streams
+// keep their file bytes and positions and get a fresh decoder.
+#include "savestate.h"
+void audio_state(StateIO &s) {
+	s.tag("AUD ");
+	for (auto &ch : s_chans) {
+		s.pod(ch.reserved); s.pod(ch.samples); s.pod(ch.fmt); s.pod(ch.lvol); s.pod(ch.rvol);
+		if (!s.saving) ch.next = 0;
+	}
+	for (auto &a : s_atrac) {
+		if (!s.saving) atrac_free(a);
+		s.pod(a.used); s.pod(a.bufAddr); s.pod(a.bufSize); s.vec(a.file); s.pod(a.fileSize); s.pod(a.dataOff);
+		s.pod(a.dataSize); s.pod(a.blockAlign); s.pod(a.channels); s.pod(a.totalSamples); s.pod(a.sampleOffset);
+		s.pod(a.allLoaded); s.pod(a.streamPos); s.pod(a.ringWrite); s.pod(a.avail); s.pod(a.readPos); s.pod(a.skip);
+		s.pod(a.decodedSamples); s.pod(a.resetPos); s.pod(a.loopNum); s.pod(a.at3plus);
+		if (!s.saving && a.used && !atrac_open_codec(a)) s.fail("cannot open the ATRAC decoder again");
+	}
+}

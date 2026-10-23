@@ -14,6 +14,7 @@
 
 #include "kernel.h"
 #include "platform.h"
+#include "savestate.h"
 
 static u32 VBLANK_US = 16683;   // 59.94 Hz; 120 Hz when the game runs above 60
 void kernel_set_vblank_hz(double hz) { VBLANK_US = (u32)(1e6 / hz); }
@@ -51,6 +52,9 @@ struct Thread {
 	Fiber *fiber = nullptr;
 	u32 argSize = 0, argPtr = 0;
 	bool pendingCallbacks = false;
+	std::vector<u32> ss = std::vector<u32>(0x10000);   // shadow call stack (recomp.h)
+	u32 *ssp = nullptr;
+	std::vector<u32> resume;   // after loading a state: the calls to re-enter
 };
 
 static const size_t HOST_STACK = 4 << 20;
@@ -62,6 +66,7 @@ static int s_next_uid = 0x100;
 static u64 s_ready_seq;
 static bool s_exit;
 static std::vector<Fiber *> s_dead_fibers;
+static std::vector<u32> s_sched_ss(0x10000);   // shadow call stack of interrupts on the scheduler
 
 std::map<int, std::pair<std::string, std::pair<int, int>>> s_semas_dump();
 
@@ -152,10 +157,12 @@ static Thread *pick_next() {
 // Switch from the current fiber back to the scheduler.
 static void switch_to_scheduler() {
 	Thread *t = s_cur;
+	t->ssp = g_ssp;
 	fiber_switch(t->fiber, s_sched_fiber);
 	// resumed
 	s_cur = t;
 	currentMIPS = &t->ctx;
+	g_ssp = t->ssp;
 }
 
 static void run_callbacks_for(Thread *t);
@@ -311,9 +318,12 @@ static u64 next_deadline() {
 	return d;
 }
 
+void savestate_begin_resume(std::vector<u32> &&sites, u32 entry);
 static void fiber_main() {
 	Thread *t = s_cur;
 	CPUState *c = &t->ctx;
+	g_ssp = t->ss.data();
+	if (!t->resume.empty()) savestate_begin_resume(std::move(t->resume), t->entry);
 	rt_call(c, t->entry);
 	kernel_exit_current_thread(c->r[2]);
 }
@@ -473,6 +483,7 @@ static u64 s_idle_since;
 u64 g_prof_guest, g_prof_ge, g_prof_flush;
 void kernel_run() {
 	s_sched_fiber = fiber_init_thread();
+	g_ssp = s_sched_ss.data();
 	while (!s_exit) {
 		process_timers();
 		for (Fiber *f : s_dead_fibers) fiber_destroy(f);
@@ -480,6 +491,10 @@ void kernel_run() {
 		Thread *t = pick_next();
 		if (!t) {
 			display_pump_events();
+			if (savestate_pending()) {
+				std::lock_guard<std::mutex> lk(s_post_mtx);
+				if (s_posted.empty()) savestate_service();
+			}
 			u64 d = next_deadline(), now = rt_time_us();
 			if (d == ~0ull) {
 				rt_log_error("deadlock: no thread ready and nothing scheduled");
@@ -503,6 +518,7 @@ void kernel_run() {
 		update_next_due();
 		u64 t0 = rt_time_us();
 		fiber_switch(s_sched_fiber, t->fiber);
+		g_ssp = s_sched_ss.data();
 		g_prof_guest += rt_time_us() - t0;
 		s_cur = nullptr;
 	}
@@ -808,6 +824,7 @@ HLE(ThreadManForUser, sceKernelAllocateFpl) {
 struct Alarm {
 	u32 handler, common;
 	int timer;
+	u64 at;   // when it fires next (for savestates)
 };
 static std::map<int, Alarm> s_alarms;
 
@@ -826,6 +843,7 @@ static void alarm_fire(int id, u64 when) {
 		// period counts from the scheduled time, not from when we got round to it
 		u64 at = std::max<u64>(when + next, rt_time_us() > when + 4 * (u64)next ? rt_time_us() : 0);
 		it->second.timer = kernel_schedule(at, [id, at] { alarm_fire(id, at); });
+		it->second.at = at;
 	} else {
 		s_alarms.erase(it);
 	}
@@ -833,8 +851,8 @@ static void alarm_fire(int id, u64 when) {
 
 HLE(ThreadManForUser, sceKernelSetAlarm) {
 	int id = kernel_new_uid();
-	s_alarms[id] = {ARG(1), ARG(2), 0};
 	u64 at = rt_time_us() + ARG(0);
+	s_alarms[id] = {ARG(1), ARG(2), 0, at};
 	s_alarms[id].timer = kernel_schedule(at, [id, at] { alarm_fire(id, at); });
 	LOGT("SetAlarm(%u us, handler %08x, common %08x) -> %d", ARG(0), ARG(1), ARG(2), id);
 	RET(id);
@@ -1265,3 +1283,87 @@ HLE(ThreadManForUser, sceKernelPollMbx) { mbx_receive(c, false, true); }
 HLE(Kernel_Library, sceKernelCpuSuspendIntr) { RET(1); }
 HLE(Kernel_Library, sceKernelCpuResumeIntr) { RET(0); }
 HLE(Kernel_Library, sceKernelCpuResumeIntrWithSync) { RET(0); }
+
+// ---------------------------------------------------------------- savestates
+// Taken while every thread waits inside one HLE call. Loading puts each waiting thread on
+// a fresh fiber that re-enters its chain of calls (recomp.h) and makes that HLE call again.
+bool rt_is_import_stub(u32 addr);
+
+std::string kernel_thread_save_blocker() {
+	for (auto &[id, t] : s_threads) {
+		if (t->status == Thread::DORMANT) continue;
+		if (t->status != Thread::WAITING) return "thread '" + t->name + "' is running";
+		size_t n = t->ssp - t->ss.data();
+		if (n < 2 || !rt_is_import_stub(t->ssp[-1])) return "thread '" + t->name + "' waits outside of a system call";
+		for (size_t i = 1; i + 2 < n; i += 2)
+			if (rt_is_import_stub(t->ss[i])) return "thread '" + t->name + "' runs a callback";
+	}
+	return "";
+}
+
+static void thread_io(StateIO &s, Thread &t) {
+	s.pod(t.id); s.str(t.name); s.pod(t.entry); s.pod(t.prio); s.pod(t.initPrio); s.pod(t.attr);
+	s.pod(t.stackSize); s.pod(t.stackAddr); s.pod(t.gp); s.pod(t.status); s.pod(t.wait); s.pod(t.waitId);
+	s.pod(t.waitDeadline); s.pod(t.waitCB); s.pod(t.waitResult); s.pod(t.waitTimeoutPtr); s.pod(t.waitArg);
+	s.pod(t.waitOutPtr); s.pod(t.waitMode); s.pod(t.readySeq); s.pod(t.wakeupCount); s.pod(t.exitStatus);
+	s.pod(t.ctx); s.pod(t.argSize); s.pod(t.argPtr); s.pod(t.pendingCallbacks);
+	std::vector<u32> chain;
+	if (s.saving && t.status == Thread::WAITING) chain.assign(t.ss.data(), t.ssp);
+	s.vec(chain);
+	if (!s.saving) t.resume = std::move(chain);
+}
+
+void kernel_thread_state(StateIO &s) {
+	s.tag("THRD");
+	s.pod(VBLANK_US); s.pod(s_next_uid); s.pod(s_ready_seq);
+	if (!s.saving) {
+		for (auto &[id, t] : s_threads) fiber_destroy(t->fiber);   // all suspended: we are the scheduler
+		for (Fiber *f : s_dead_fibers) fiber_destroy(f);
+		s_dead_fibers.clear();
+		s_threads.clear();
+	}
+	u32 n = (u32)s_threads.size();
+	s.pod(n);
+	if (s.saving) {
+		for (auto &[id, t] : s_threads) thread_io(s, *t);
+	} else {
+		for (u32 i = 0; i < n && !s.bad; i++) {
+			auto t = std::make_unique<Thread>();
+			thread_io(s, *t);
+			if (t->status == Thread::WAITING) {
+				t->status = Thread::READY;   // runs to its system call again
+				t->wait = WAIT_NONE;
+				t->fiber = fiber_create(fiber_main, HOST_STACK);
+			} else if (t->status != Thread::DORMANT) {
+				s.fail("thread '" + t->name + "' was neither waiting nor dormant");
+			}
+			int id = t->id;
+			s_threads[id] = std::move(t);
+		}
+	}
+	s.map(s_callbacks, [](StateIO &s, Callback &cb) {
+		s.pod(cb.id); s.str(cb.name); s.pod(cb.tid); s.pod(cb.func); s.pod(cb.common); s.pod(cb.notifyCount); s.pod(cb.notifyArg);
+	});
+	s.tag("KOBJ");
+	s.map(s_semas, [](StateIO &s, Sema &x) { s.str(x.name); s.pod(x.attr); s.pod(x.count); s.pod(x.max); });
+	s.map(s_fpls, [](StateIO &s, Fpl &x) { s.str(x.name); s.pod(x.base); s.pod(x.blockSize); s.pod(x.numBlocks); s.bools(x.used); });
+	s.map(s_alarms, [](StateIO &s, Alarm &x) { s.pod(x.handler); s.pod(x.common); s.pod(x.at); });
+	s.map(s_evfs, [](StateIO &s, EventFlag &x) { s.str(x.name); s.pod(x.attr); s.pod(x.pattern); });
+	s.map(s_mutexes, [](StateIO &s, Mutex &x) { s.str(x.name); s.pod(x.attr); s.pod(x.count); s.pod(x.owner); });
+	s.map(s_lwmutexes, [](StateIO &s, LwMutex &x) { s.str(x.name); s.pod(x.workarea); });
+	s.map(s_mbxs, [](StateIO &s, Mbx &x) { s.str(x.name); s.pod(x.attr); s.deq(x.msgs); });
+	if (!s.saving) {
+		// timers hold closures: rebuild them from the restored objects
+		s_timers.clear();
+		s_posted.clear();   // the caller holds s_post_mtx
+		u64 now = rt_time_us();
+		kernel_schedule(now + VBLANK_US, [now] { vblank_tick(now + VBLANK_US); });
+		for (auto &[id, a] : s_alarms) {
+			u64 at = std::max(a.at, now);
+			int aid = id;
+			a.timer = kernel_schedule(at, [aid, at] { alarm_fire(aid, at); });
+		}
+		s_next_due = 0;
+		s_cur = nullptr;
+	}
+}

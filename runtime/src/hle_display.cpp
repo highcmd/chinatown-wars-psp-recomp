@@ -12,6 +12,7 @@
 #include "ge_gl.h"
 #include "settings.h"
 #include "osd.h"
+#include "savestate.h"
 
 static SDL_Window *s_win;
 
@@ -219,6 +220,8 @@ void display_present() {
 
 // Scripted input for headless testing: CTW_INPUT="16=start,20.5=cross+down,30=cross:1.0"
 // (time in seconds = buttons joined by '+', optional :duration, default 0.15 s)
+// "nup ndown nleft nright" push the analog nub to its edge.
+enum : u32 { SCRIPT_NUB_UP = 1u << 28, SCRIPT_NUB_DOWN = 1u << 29, SCRIPT_NUB_LEFT = 1u << 30, SCRIPT_NUB_RIGHT = 1u << 31 };
 struct ScriptedPress { double t, dur; u32 buttons; };
 static std::vector<ScriptedPress> s_script;
 static void parse_script() {
@@ -229,7 +232,8 @@ static void parse_script() {
 	if (!e) return;
 	static const struct { const char *n; u32 b; } names[] = {
 		{"select", 0x1}, {"start", 0x8}, {"up", 0x10}, {"right", 0x20}, {"down", 0x40}, {"left", 0x80},
-		{"l", 0x100}, {"r", 0x200}, {"triangle", 0x1000}, {"circle", 0x2000}, {"cross", 0x4000}, {"square", 0x8000}};
+		{"l", 0x100}, {"r", 0x200}, {"triangle", 0x1000}, {"circle", 0x2000}, {"cross", 0x4000}, {"square", 0x8000},
+		{"nup", SCRIPT_NUB_UP}, {"ndown", SCRIPT_NUB_DOWN}, {"nleft", SCRIPT_NUB_LEFT}, {"nright", SCRIPT_NUB_RIGHT}};
 	std::string str = e;
 	size_t i = 0;
 	while (i < str.size()) {
@@ -322,13 +326,18 @@ static void build_bindings() {
 }
 
 static void update_buttons() {
-	if (s_headless) { s_buttons = scripted_buttons(); return; }
-	static bool bound;
-	if (!bound) { build_bindings(); bound = true; }
-	const Uint8 *k = SDL_GetKeyboardState(nullptr);
 	u32 b = scripted_buttons(), analog = 0;
-	for (const KeyBind &kb : s_keyBinds)
-		if (k[kb.sc]) { b |= kb.bit; analog |= kb.analog; }
+	if (b & SCRIPT_NUB_UP) analog |= AN_UP;
+	if (b & SCRIPT_NUB_DOWN) analog |= AN_DOWN;
+	if (b & SCRIPT_NUB_LEFT) analog |= AN_LEFT;
+	if (b & SCRIPT_NUB_RIGHT) analog |= AN_RIGHT;
+	b &= 0xFFFFFFF;
+	static bool bound;
+	if (!s_headless && !bound) { build_bindings(); bound = true; }
+	const Uint8 *k = s_headless ? nullptr : SDL_GetKeyboardState(nullptr);
+	if (k)
+		for (const KeyBind &kb : s_keyBinds)
+			if (k[kb.sc]) { b |= kb.bit; analog |= kb.analog; }
 	int lx = 128, ly = 128;
 	if (analog & AN_LEFT) lx = 0;
 	if (analog & AN_RIGHT) lx = 255;
@@ -390,6 +399,10 @@ void display_pump_events() {
 		}
 		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F2)
 			g_osd_fps = !g_osd_fps;
+		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F5)
+			savestate_request_save(1);   // quick save / load (savestate.cpp)
+		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F9)
+			savestate_request_load(1);
 		if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) {
 			if (SDL_GetWindowFlags(s_win) & SDL_WINDOW_FULLSCREEN) SDL_SetWindowFullscreen(s_win, 0);
 			else enter_fullscreen();
@@ -504,4 +517,10 @@ static void ctrl_fill(CPUState *c) {
 		for (int k = 10; k < 16; k++) SB(q + k, 0);
 	}
 	RET(n);
+}
+
+#include "savestate.h"
+void display_state(StateIO &s) {
+	s.tag("DISP");
+	s.pod(s_vcount); s.pod(s_fb_addr); s.pod(s_fb_width); s.pod(s_fb_fmt);
 }

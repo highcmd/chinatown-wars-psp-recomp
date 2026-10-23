@@ -54,3 +54,9 @@ HLE(InterruptManager, sceKernelDisableSubIntr) {
 	it->second.enabled = false;
 	RET(0);
 }
+
+#include "savestate.h"
+void intr_state(StateIO &s) {
+	s.tag("INTR");
+	s.map(s_handlers, [](StateIO &s, SubIntr &h) { s.pod(h); });
+}

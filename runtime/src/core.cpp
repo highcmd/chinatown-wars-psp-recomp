@@ -72,9 +72,12 @@ static u64 steady_us() {
 	static auto t0 = std::chrono::steady_clock::now();
 	return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
 }
+// A loaded savestate moves the clock to the time it was taken (rt_set_time_us).
+static s64 s_time_offset;
+void rt_set_time_us(u64 t) { s_time_offset = (s64)t - (s64)steady_us(); }
 #ifdef _WIN32
 static struct ClockStart { ClockStart() { steady_us(); } } s_clock_start;
-u64 rt_time_us() { return std::max<u64>(steady_us(), 1); }
+u64 rt_time_us() { return (u64)std::max<s64>((s64)steady_us() + s_time_offset, 1); }
 #else
 static std::atomic<u64> s_now_us;
 static struct Ticker {
@@ -89,7 +92,7 @@ static struct Ticker {
 		}).detach();
 	}
 } s_ticker;
-u64 rt_time_us() { return std::max<u64>(s_now_us.load(std::memory_order_relaxed), 1); }
+u64 rt_time_us() { return (u64)std::max<s64>((s64)s_now_us.load(std::memory_order_relaxed) + s_time_offset, 1); }
 #endif
 
 std::string gstr(u32 a) {
@@ -197,6 +200,8 @@ static const RecompEntry *find_containing(u32 a) {
 	const RecompEntry *e = &g_recomp_funcs[lo - 1];
 	return a < e->end ? e : nullptr;
 }
+
+bool rt_is_import_stub(u32 addr) { return s_import_by_stub.count(addr & 0x3FFFFFFF) != 0; }
 
 void rt_call(CPUState *c, u32 addr) {
 	addr &= 0x3FFFFFFF;

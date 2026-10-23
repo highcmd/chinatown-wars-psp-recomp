@@ -306,3 +306,17 @@ HLE(sceGe_user, sceGeRestoreContext) {
 	}
 	RET(0);
 }
+
+// ---------------------------------------------------------------- savestates
+#include "savestate.h"
+bool ge_idle() {
+	std::lock_guard<std::mutex> lk(s_mtx);
+	return s_queue.empty() && !s_busy;
+}
+void ge_state(StateIO &s) {
+	s.tag("GE  ");
+	std::lock_guard<std::mutex> lk(s_mtx);
+	s.map(s_ge_cbs, [](StateIO &s, GeCallback &cb) { s.pod(cb); });
+	s.pod(s_next_ge_cb); s.pod(s_next_list); s.arr(s_ge_cmds); s.pod(g_ge_base); s.pod(g_ge_offset);
+	if (!s.saving) s_queue.clear();
+}

@@ -1707,3 +1707,12 @@ void ge_exec_cmd(u32 cmd, u32 op, u32 pc) {
 	default: break;
 	}
 }
+
+// ============================================================ savestates
+#include "savestate.h"
+void ge_render_state(StateIO &s) {
+	s.tag("GER ");
+	s.arr(R); s.arr(worldM); s.arr(viewM); s.arr(projM); s.arr(tgenM); s.arr(boneM);
+	s.pod(worldN); s.pod(viewN); s.pod(projN); s.pod(tgenN); s.pod(boneN);
+	s.arr(morphW); s.arr(clut); s.pod(s_vaddr); s.pod(s_iaddr); s.pod(s_clut_hash);
+}

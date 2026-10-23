@@ -74,6 +74,7 @@ class FuncGen:
         self.out = []
         self.labels = set()
         self.unhandled = []
+        self.sites = []   # (key, resume code): call sites a savestate can re-enter
 
     # --- operand helpers --------------------------------------------------
     @staticmethod
@@ -106,11 +107,28 @@ class FuncGen:
             if jt:
                 self.labels.update(t for t in jt if self.inside(t))
 
-    def jump_to(self, t):
-        """Unconditional transfer to guest address t (goto or tail call)."""
+    def jump_to(self, t, a):
+        """Unconditional transfer from a to guest address t (goto or tail call)."""
         if self.inside(t):
             return f"goto L_{t:08X};"
-        return self.rc.call_expr(t) + " return;"
+        call = self.call(a, hx(t), self.rc.call_expr(t))
+        self.sites.append((a, call + " return;"))
+        return call + " return;"
+
+    @staticmethod
+    def call(a, tgt, stmt):
+        """A native call, recorded on the thread's shadow call stack (key = guest address
+        of the call instruction) so that a savestate can rebuild the chain of calls."""
+        return f"{{ u32 *ss_ = g_ssp; ss_[0] = {hx(a)}; ss_[1] = {tgt}; g_ssp = ss_ + 2; {stmt} g_ssp = ss_; }}"
+
+    def site_call(self, a, nxt, tgt, stmt):
+        """Emit a call that returns to nxt, and its resume case."""
+        self.emit(self.call(a, tgt, stmt))
+        self.out.append(f"R_{nxt:08X}:;")
+        if tgt == "tgt":
+            self.sites.append((a, f"{{ u32 tgt = g_resume_tgt; {self.call(a, 'tgt', stmt)} }} goto R_{nxt:08X};"))
+        else:
+            self.sites.append((a, f"{self.call(a, tgt, stmt)} goto R_{nxt:08X};"))
 
     # --- main -------------------------------------------------------------
     def gen(self):
@@ -129,7 +147,16 @@ class FuncGen:
         # falling off the end continues into the next function
         last = self.img.u32(self.end - 8) if self.end - self.start >= 8 else 0
         if not self.rc.is_uncond(last):
-            self.emit(self.rc.call_expr(self.end) + " return;")
+            self.emit(self.jump_to(self.end, self.end - 4))
+        if self.sites:
+            res = [f"\tif (g_resuming) switch (rt_resume_site({hx(self.start)})) {{"]
+            seen = set()
+            for k, code in self.sites:
+                if k not in seen:
+                    seen.add(k)
+                    res.append(f"\tcase {hx(k)}: {code}")
+            res += ["\tdefault: return;", "\t}"]
+            self.out = res + self.out
         body = "\n".join(self.out)
         hook = self.rc.hooks.get(self.start)
         if hook:
@@ -163,12 +190,12 @@ class FuncGen:
             if op == 3:
                 self.emit(f"c->r[31] = {hx(nxt)};")
                 self.out += d
-                self.emit(rc.call_expr(t))
+                self.site_call(a, nxt, hx(t), rc.call_expr(t))
             else:
                 self.out += d
                 if self.rc.is_halt_loop(a, w):
                     self.emit(f"rt_halt(c, {hx(a)});")
-                self.emit(self.jump_to(t))
+                self.emit(self.jump_to(t, a))
         elif op == 0 and (w & 0x3F) == 8:         # jr
             self.emit(f"{{ u32 tgt = {self.r(rs)};")
             self.out += d
@@ -178,15 +205,19 @@ class FuncGen:
                 self.emit("\tswitch (tgt) {")
                 for t in sorted(set(rc.jumptables[a])):
                     self.emit(f"\tcase {hx(t)}: goto L_{t:08X};")
-                self.emit(f"\tdefault: rt_call(c, tgt); return;\n\t}} }}")
+                self.emit(f"\tdefault: {self.call(a, 'tgt', 'rt_call(c, tgt);')} return;\n\t}} }}")
+                self.sites.append((a, f"{{ u32 tgt = g_resume_tgt; {self.call(a, 'tgt', 'rt_call(c, tgt);')} }} return;"))
             else:
-                self.emit("\trt_call(c, tgt); return; }")
+                self.emit(f"\t{self.call(a, 'tgt', 'rt_call(c, tgt);')} return; }}")
+                self.sites.append((a, f"{{ u32 tgt = g_resume_tgt; {self.call(a, 'tgt', 'rt_call(c, tgt);')} }} return;"))
         elif op == 0 and (w & 0x3F) == 9:         # jalr
             self.emit(f"{{ u32 tgt = {self.r(rs)};")
             if rd:
                 self.emit(f"\tc->r[{rd}] = {hx(nxt)};")
             self.out += d
-            self.emit("\trt_call(c, tgt); }")
+            self.emit(f"\t{self.call(a, 'tgt', 'rt_call(c, tgt);')} }}")
+            self.out.append(f"R_{nxt:08X}:;")
+            self.sites.append((a, f"{{ u32 tgt = g_resume_tgt; {self.call(a, 'tgt', 'rt_call(c, tgt);')} }} goto R_{nxt:08X};"))
         else:                                     # conditional branches
             t = rc.branch_target(w, a)
             cond, likely, link = self.branch_cond(w)
@@ -197,15 +228,15 @@ class FuncGen:
             if likely:
                 self.emit(f"if ({cond}) {{")
                 self.out += ["\t" + x for x in d]
-                self.emit("\t" + self.jump_to(t))
+                self.emit("\t" + self.jump_to(t, a))
                 self.emit("}")
             elif cond == "true":
                 self.out += d
-                self.emit(self.jump_to(t))
+                self.emit(self.jump_to(t, a))
             else:
                 self.emit(f"{{ bool taken = {cond};")
                 self.out += ["\t" + x for x in d]
-                self.emit(f"\tif (taken) {{ {self.jump_to(t)} }} }}")
+                self.emit(f"\tif (taken) {{ {self.jump_to(t, a)} }} }}")
         # someone may jump straight into the delay slot
         if a + 4 in self.labels:
             self.emit(f"goto L_{nxt:08X};")

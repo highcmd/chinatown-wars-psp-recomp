@@ -302,3 +302,5 @@ HLE(sceMpeg, sceMpegAtracDecode) {
 	if (gvalid(ARG(2))) memset(gptr(ARG(2)), 0, 8192);
 	RET(0);
 }
+
+std::string mpeg_save_blocker() { return s_mpegs.empty() ? "" : "a video is playing"; }

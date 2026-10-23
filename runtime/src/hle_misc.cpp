@@ -72,3 +72,9 @@ HLE(sceUtility, sceUtilityGetSystemParamInt) {
 	RET(0);
 }
 
+
+#include "savestate.h"
+void misc_state(StateIO &s) {
+	s.tag("DLG ");
+	s.pod(s_msg); s.pod(s_osk); s.pod(s_net);
+}

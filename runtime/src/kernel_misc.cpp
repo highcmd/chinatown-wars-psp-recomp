@@ -251,3 +251,12 @@ HLE(sceUmdUser, sceUmdGetDriveStat) { RET(0x32); }  // PRESENT | READY | READABL
 HLE(sceUmdUser, sceUmdGetErrorStat) { RET(0); }
 HLE(sceUmdUser, sceUmdRegisterUMDCallBack) { s_umd_cb = (int)ARG(0); RET(0); }
 HLE(sceUmdUser, sceUmdUnRegisterUMDCallBack) { s_umd_cb = 0; RET(0); }
+
+// ------------------------------------------------------------- savestates
+#include "savestate.h"
+void kernel_misc_state(StateIO &s) {
+	s.tag("KMSC");
+	s.map(s_blocks, [](StateIO &s, Block &b) { s.pod(b.addr); s.pod(b.size); s.str(b.name); });
+	s.map(s_partblocks, [](StateIO &s, PartBlock &b) { s.pod(b.addr); });
+	s.pod(s_volatile_locked); s.pod(s_exit_cb); s.pod(s_umd_cb);
+}

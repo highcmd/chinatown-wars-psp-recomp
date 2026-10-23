@@ -77,6 +77,18 @@ camera"); its addresses match this v1.01 executable word for word:
   turns it off.
 Cutscene cameras are affected too while it is on, as in the original cheat.
 
+## Savestates (F5 / F9)
+`runtime/src/savestate.cpp`. Every call in generated code pushes (address of the call
+instruction, target) on the running thread's shadow call stack (`g_ssp`, one per thread). A
+state is taken from the scheduler while every thread waits inside exactly one system call and
+the GE is idle: guest RAM/VRAM/scratchpad, threads (registers + shadow stack), kernel objects,
+open files (path + position), audio channels, ATRAC streams, GE registers, dialogs. Host
+stacks are not saved, so states survive rebuilds. Loading gives each waiting thread a new fiber
+that re-enters its calls: a generated function entered while `g_resuming` switches on the next
+recorded call site, makes that call and continues after it; the innermost call is the system
+call, made again (its wait starts afresh). The guest clock continues from the saved time.
+Not possible while a video plays. Timers are rebuilt (vblank, alarms).
+
 ## 60 fps: why the game stays at 30
 F_0890D53C ends each frame with `while (vblanks since the last flip < 2) sceDisplayWaitVblankStart()`
 (`sltiu a0,a0,2` at 0x0890D680). Comparing with 1 does give 60 fps, but the whole game then runs twice

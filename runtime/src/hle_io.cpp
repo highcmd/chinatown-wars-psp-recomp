@@ -555,3 +555,36 @@ HLE(IoFileMgrForUser, sceIoDevctl) {
 	}
 	RET(0);
 }
+
+// ---------------------------------------------------------------- savestates
+// Open files are saved as path + position and opened again on load.
+#include "savestate.h"
+void io_state(StateIO &s) {
+	s.tag("IO  ");
+	s.pod(s_next_fd);
+	s.str(s_cwd);
+	if (!s.saving) {
+		for (auto &[fd, of] : s_files) if (of.f) fclose(of.f);
+	}
+	s.map(s_files, [](StateIO &s, OpenFile &of) {
+		s.pod(of.isDir); s.pod(of.dirPos); s.str(of.path); s.pod(of.blockMode); s.pod(of.raw);
+		s.pod(of.rawStart); s.pod(of.rawSize); s.pod(of.isoFile); s.pod(of.asyncResult); s.pod(of.asyncPending);
+		u32 ne = (u32)of.entries.size();
+		s.pod(ne);
+		if (!s.saving) of.entries.resize(s.bad ? 0 : ne);
+		for (auto &e : of.entries) { s.str(e.name); s.pod(e.dir); s.pod(e.size); s.pod(e.mtime); }
+		u8 hasFile = of.f != nullptr;
+		s64 pos = of.f ? (s64)ftello(of.f) : 0;
+		s.pod(hasFile); s.pod(pos);
+		if (s.saving || !hasFile) { if (!s.saving) of.f = nullptr; return; }
+		if (of.raw) {
+			of.f = fopen(g_iso_path.c_str(), "rb");
+		} else {
+			std::string h = io_host_path(of.path);
+			of.f = fopen(h.c_str(), "r+b");
+			if (!of.f) of.f = fopen(h.c_str(), "rb");
+		}
+		if (!of.f) { s.fail("cannot open " + of.path + " again"); return; }
+		fseeko(of.f, pos, SEEK_SET);
+	});
+}

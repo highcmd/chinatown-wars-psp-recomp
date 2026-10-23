@@ -66,6 +66,15 @@ void rt_break(CPUState *c, u32 pc);
 void rt_halt(CPUState *c, u32 pc);
 void rt_syscall(CPUState *c, u32 pc, u32 op);
 
+// --- savestates (savestate.cpp) ---
+// Every call in generated code pushes (address of the call instruction, target) on the
+// running thread's shadow call stack. Loading a state re-enters each thread's chain of
+// calls: a function entered while g_resuming jumps to the call site rt_resume_site() names.
+extern u32 *g_ssp;
+extern bool g_resuming;
+extern u32 g_resume_tgt;
+u32 rt_resume_site(u32 func);
+
 // --- memory: guest address & 0x1FFFFFFF indexes a 512 MB reservation ---
 #define GADDR(a) (g_mem + ((u32)(a) & 0x1FFFFFFFu))
 static inline u32 LW(u32 a) { u32 v; memcpy(&v, GADDR(a), 4); return v; }
