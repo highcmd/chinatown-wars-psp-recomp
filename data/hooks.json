@@ -1,1 +1,4 @@
-{}
+{
+ "_comment": "Functions replaced by C++ in runtime/src/game_hooks.cpp (the hook gets the original as `orig`).",
+ "0x089F4754": "tpcam_stream_ahead"
+}
