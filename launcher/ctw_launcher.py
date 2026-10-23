@@ -13,8 +13,8 @@ import json, os, pathlib, platform, queue, shutil, subprocess, sys, threading, t
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-APP_VERSION = "0.1.0"
-BUILD_VERSION = "0.1.0"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
+APP_VERSION = "0.1.1"
+BUILD_VERSION = "0.1.1"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
 FROZEN = getattr(sys, "frozen", False)
 IS_WIN = os.name == "nt"
 HERE = pathlib.Path(__file__).resolve().parent
@@ -48,6 +48,8 @@ TEXT = {
         "fps_hint": "The screen refreshes at {hz} Hz: with VSync on, the game runs at most {hz} fps.",
         "psp": "PSP button", "key": "Keyboard", "key2": "Keyboard (2nd)", "pad": "Gamepad", "pad2": "Gamepad (2nd)",
         "press_key": "Press a key… (Esc = none)", "none": "—",
+        "tpcam": "Start with the third-person camera (F1 toggles it in game)",
+        "cam_height": "Third-person camera height", "cam_default": "default 15000",
         "deadzone": "Left stick dead zone", "rstick": "Right stick also works as the D-pad",
         "defaults": "Reset to defaults",
         "stick_note": "The left stick of a gamepad is always the PSP analog stick.",
@@ -83,6 +85,8 @@ TEXT = {
         "fps_hint": "Ekran odświeża {hz} Hz: z włączonym VSync gra działa najwyżej w {hz} fps.",
         "psp": "Przycisk PSP", "key": "Klawiatura", "key2": "Klawiatura (2.)", "pad": "Pad", "pad2": "Pad (2.)",
         "press_key": "Naciśnij klawisz… (Esc = brak)", "none": "—",
+        "tpcam": "Startuj z kamerą z trzeciej osoby (F1 przełącza w grze)",
+        "cam_height": "Wysokość kamery z 3. osoby", "cam_default": "domyślnie 15000",
         "deadzone": "Martwa strefa lewej gałki", "rstick": "Prawa gałka działa też jako krzyżak",
         "defaults": "Przywróć domyślne",
         "stick_note": "Lewa gałka pada to zawsze analog PSP.",
@@ -509,6 +513,18 @@ class Launcher:
         ttk.Radiobutton(fr, text=L["renderer_gl"], value="gl", variable=self.renderer_var).pack(side="left", padx=(0, 14))
         ttk.Radiobutton(fr, text=L["renderer_sw"], value="software", variable=self.renderer_var).pack(side="left")
 
+        self.tpcam_var = tk.BooleanVar()
+        ttk.Checkbutton(f, text=L["tpcam"], variable=self.tpcam_var).grid(
+            row=9, column=1, sticky="w", pady=(12, 4))
+        ttk.Label(f, text=L["cam_height"]).grid(row=10, column=0, sticky="w", pady=4)
+        fr = ttk.Frame(f)
+        fr.grid(row=10, column=1, sticky="w")
+        self.cam_var = tk.IntVar(value=15000)
+        ttk.Scale(fr, from_=5000, to=60000, variable=self.cam_var, length=220,
+                  command=lambda _=None: self.cam_var.set(round(self.cam_var.get() / 500) * 500)).pack(side="left")
+        ttk.Label(fr, textvariable=self.cam_var, width=7).pack(side="left", padx=8)
+        ttk.Button(fr, text=L["cam_default"], command=lambda: self.cam_var.set(15000)).pack(side="left")
+
     def tab_controls(self, nb):
         outer = ttk.Frame(nb, padding=(16, 10))
         nb.add(outer, text=L["tab_controls"])
@@ -624,6 +640,11 @@ class Launcher:
         self.dz_var.set(round(dz * 100 / 32767))
         self.dz_label.configure(text=f"{self.dz_var.get()} %")
         self.rstick_var.set(ini.get("right_stick_dpad", "false") in ("1", "true", "on", "yes"))
+        self.tpcam_var.set(ini.get("third_person_camera", "false") in ("1", "true", "on", "yes"))
+        try:
+            self.cam_var.set(max(1000, min(200000, int(ini.get("camera_height", "15000")))))
+        except ValueError:
+            self.cam_var.set(15000)
         self.update_refresh()
 
     def save_settings(self):
@@ -638,6 +659,7 @@ class Launcher:
             "deadzone": str(self.dz_raw if self.dz_var.get() == round(self.dz_raw * 100 / 32767)
                             else round(self.dz_var.get() * 32767 / 100)),
             "right_stick_dpad": b(self.rstick_var.get()),
+            "third_person_camera": b(self.tpcam_var.get()), "camera_height": str(self.cam_var.get()),
         })
         for name, _, _, pads in INPUTS:
             keys = [self.key_vars[(name, i)].get() for i in range(2)]
