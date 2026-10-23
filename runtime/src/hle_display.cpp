@@ -11,6 +11,7 @@
 #include "kernel.h"
 #include "ge_gl.h"
 #include "settings.h"
+#include "osd.h"
 
 static SDL_Window *s_win;
 
@@ -91,6 +92,7 @@ void display_init(bool headless) {
 		flags |= SDL_WINDOW_OPENGL | (headless ? SDL_WINDOW_HIDDEN : 0);
 	}
 	g_cheats = st.thirdPerson ? 1u : 0u;
+	g_osd_fps = st.showFps;
 	s_win = SDL_CreateWindow(window_title(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, st.width, st.height, flags);
 	if (s_win && exclusive && !headless) enter_fullscreen();
 	if (wantGL && s_win && gl_display_init(s_win, headless, st.vsync, st.linear)) {
@@ -190,6 +192,10 @@ void display_present() {
 			char name[64];
 			snprintf(name, sizeof(name), "shot_%03d.ppm", shot++);
 			gl_display_screenshot(name);
+			if (getenv("CTW_DUMP_MEM")) {   // debug: user RAM next to each screenshot
+				snprintf(name, sizeof(name), "mem_%03d.bin", shot - 1);
+				if (FILE *f = fopen(name, "wb")) { fwrite(g_mem + 0x08800000, 1, 0x01800000, f); fclose(f); }
+			}
 			next += every;
 		}
 		return;
@@ -203,6 +209,7 @@ void display_present() {
 		next += every;
 	}
 	if (s_headless) return;
+	osd_blit(s_rgba.data(), 480 * s_tex_scale, 272 * s_tex_scale, std::max(1, s_tex_scale));
 	SDL_UpdateTexture(s_tex, nullptr, s_rgba.data(), 480 * s_tex_scale * 4);
 	SDL_RenderClear(s_ren);
 	SDL_RenderCopy(s_ren, s_tex, nullptr, nullptr);
@@ -360,7 +367,10 @@ void display_pump_events() {
 	if (s_headless) { update_buttons(); return; }
 	SDL_Event e;
 	while (SDL_PollEvent(&e)) {
+		// The hidden GE context window keeps SDL from sending SDL_QUIT when the game window
+		// closes (X button, Alt+F4), so the window's own close event quits too.
 		if (e.type == SDL_QUIT) kernel_request_exit();
+		if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) kernel_request_exit();
 		if (e.type == SDL_CONTROLLERDEVICEADDED) open_pad(e.cdevice.which);
 		if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
 			for (size_t i = 0; i < s_pads.size(); i++)
@@ -374,8 +384,11 @@ void display_pump_events() {
 		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F1) {
 			g_cheats ^= 1u;   // third-person camera (data/cheats.json, game_hooks.cpp)
 			rt_log(LOG_DISPLAY, "third-person camera %s", g_cheats & 1u ? "on" : "off");
+			osd_message("CAMERA: %s", g_cheats & 1u ? "THIRD PERSON" : "ORIGINAL");
 			SDL_SetWindowTitle(s_win, window_title());
 		}
+		if (e.type == SDL_KEYDOWN && !e.key.repeat && e.key.keysym.scancode == SDL_SCANCODE_F2)
+			g_osd_fps = !g_osd_fps;
 		if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_F11) {
 			if (SDL_GetWindowFlags(s_win) & SDL_WINDOW_FULLSCREEN) SDL_SetWindowFullscreen(s_win, 0);
 			else enter_fullscreen();
@@ -424,6 +437,7 @@ void display_on_vblank() {
 		lastT = now;
 		lastF = g_frames_finished;
 	}
+	osd_on_vblank();
 	display_pump_events();
 	display_present();
 }

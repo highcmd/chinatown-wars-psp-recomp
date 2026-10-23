@@ -29,6 +29,7 @@ In `ctw.ini`, write `key = value`, one per line; `#` starts a comment. On the co
 | `vsync` | `--vsync` | `true`/`false` | `false` | sync presentation to the monitor refresh rate |
 | `deadzone` | `--deadzone N` | `0`–`32767` | `8000` | left-stick deadzone; raise it if the rider drifts |
 | `right_stick_dpad` | `--right-stick-dpad` | `true`/`false` | `false` | the right stick also works as the D-pad (menus) |
+| `show_fps` | `--show-fps` | `true`/`false` | `false` | FPS meter in the top-left corner; F2 toggles it while playing |
 | `third_person_camera` | `--third-person-camera` | `true`/`false` | `false` | start with the third-person camera; F1 toggles it while playing |
 | `camera_height` | `--camera-height N` | 1000..200000 | `15000` | height of the third-person camera (the game's own top-down camera is ~111700) |
 | `pad_mapping` | `--pad-mapping STR` | SDL mapping line | none | adds a mapping for a pad SDL doesn't know, see [Gamepads](#gamepads) |
@@ -120,6 +121,8 @@ Tested with a wired Xbox 360 pad (in SSX On Tour, which shares this runtime).
 | Select | Back | Backspace or right Shift |
 | none | none | F11 = toggle fullscreen |
 | none | none | F1 = toggle the third-person camera |
+| none | none | F2 = show/hide the FPS meter |
+| none | none | window close button / Alt+F4 = quit |
 
 Keyboard and pads can be used at the same time.
 
@@ -207,6 +210,8 @@ These are for development. A normal player never needs them.
 |---|---|---|
 | `CTW_LOG` | `CTW_LOG=io,ge` | log only these channels: `kernel thread io display ge audio misc` (`rt` and `unimpl` are always on) |
 | `CTW_FPS` | `CTW_FPS=2` | log fps and per-frame timings every 2 s |
+| `CTW_DUMP_MEM` | `CTW_DUMP_MEM=1` | with `CTW_SHOT_EVERY`: user RAM (0x08800000, 24 MB) to `mem_NNN.bin` next to each screenshot |
+| `CTW_WATCH` | `CTW_WATCH=08C1F604` | only in a build with `-DCMAKE_CXX_FLAGS=-DCTW_WATCH`: log the first stores to that address with a guest backtrace |
 | `CTW_SHOT_EVERY` | `CTW_SHOT_EVERY=5` | write a screenshot every 5 s |
 | `CTW_INPUT` | `CTW_INPUT="16=start,20.5=cross+down,30=cross:1.0"` | scripted button presses: `seconds=buttons[:duration]` (buttons: `cross circle square triangle up down left right l r start select`) |
 | `CTW_GETRACE_AT` | `CTW_GETRACE_AT=40` | dump one frame of GE commands at 40 s |

@@ -10,6 +10,7 @@
 // Orientation: PSP row y is GL row y (row 0 at the bottom of the GL texture),
 // so scissor rects and texture rows need no flipping; only presentation flips.
 #include "ge_gl.h"
+#include "osd.h"
 
 #include "platform.h"
 #include <algorithm>
@@ -616,6 +617,12 @@ void present_thread() {
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	GLuint readFbo;
 	glGenFramebuffers(1, &readFbo);
+	GLuint osdTex, osdSampler;
+	glGenTextures(1, &osdTex);
+	glGenSamplers(1, &osdSampler);
+	glSamplerParameteri(osdSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glSamplerParameteri(osdSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	std::vector<u32> osdPx;
 	std::vector<u32> px;
 
 	u64 lastSerial = ~0ull, lastPresentUs = 0;
@@ -677,6 +684,17 @@ void present_thread() {
 			glBindSampler(0, sampler);
 			glUniform4f(uRect, 0.0f, 0.0f, (float)srcW / texW, (float)srcH / texH);
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			int ow, oh;
+			if (osd_build(osdPx, ow, oh)) {   // FPS meter / hotkey message, top left of the picture
+				int k = std::max(2, vh / 300);
+				glBindTexture(GL_TEXTURE_2D, osdTex);
+				glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, ow, oh, 0, GL_RGBA, GL_UNSIGNED_BYTE, osdPx.data());
+				glBindSampler(0, osdSampler);
+				glViewport((dw - vw) / 2 + k * 4, (dh - vh) / 2 + vh - k * (oh + 4), ow * k, oh * k);
+				glUniform4f(uRect, 0.0f, 0.0f, 1.0f, 1.0f);
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			}
 			SDL_GL_SwapWindow(g_win);
 		}
 		if (!shot.empty()) {

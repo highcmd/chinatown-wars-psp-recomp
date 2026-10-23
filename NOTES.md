@@ -77,6 +77,22 @@ camera"); its addresses match this v1.01 executable word for word:
   turns it off.
 Cutscene cameras are affected too while it is on, as in the original cheat.
 
+## 60 fps: why the game stays at 30
+F_0890D53C ends each frame with `while (vblanks since the last flip < 2) sceDisplayWaitVblankStart()`
+(`sltiu a0,a0,2` at 0x0890D680). Comparing with 1 does give 60 fps, but the whole game then runs twice
+as fast (cutscenes, scripts, movement): the logic advances one fixed step per frame. Memory dumps of
+30 and 60 fps runs (`CTW_DUMP_MEM`) show no time-step variable (no float or integer that halves at
+60 fps), only frame counters that double, and the code holds no 1/30 s, 33 ms or 16.7 ms constant; the only
+millisecond clock (0x08BF1DD0) follows real time. The engine is the DS game's fixed-point, frame-locked
+design. Real 60 fps would need in-between frames (e.g. interpolating transforms between two game
+frames), not a patch.
+
+## Window and hotkeys
+- The hidden window that holds the GE's GL context keeps SDL from sending SDL_QUIT when the game window
+  closes, so SDL_WINDOWEVENT_CLOSE quits as well (X button, Alt+F4).
+- `osd.cpp`: a 5x7 bitmap font box in the top-left corner, drawn by both presenters: the FPS meter (F2,
+  `show_fps`) and a 2 s message after a hotkey.
+
 ## Known issues
 - The CPU renderer draws the bloom wrong (bright horizontal streaks): its render-to-texture of the
   0x04110000/0x04132000 buffers with changing strides doesn't match. The GPU renderer is right.

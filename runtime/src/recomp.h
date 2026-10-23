@@ -71,9 +71,16 @@ void rt_syscall(CPUState *c, u32 pc, u32 op);
 static inline u32 LW(u32 a) { u32 v; memcpy(&v, GADDR(a), 4); return v; }
 static inline u32 LH(u32 a) { u16 v; memcpy(&v, GADDR(a), 2); return v; }
 static inline u32 LB(u32 a) { return *GADDR(a); }
-static inline void SW(u32 a, u32 v) { memcpy(GADDR(a), &v, 4); }
-static inline void SH(u32 a, u16 v) { memcpy(GADDR(a), &v, 2); }
-static inline void SB(u32 a, u8 v) { *GADDR(a) = v; }
+#ifdef CTW_WATCH   // debug build: log the guest code storing to CTW_WATCH=<addr> (core.cpp)
+extern u32 g_watch;
+void rt_watch_hit(u32 a, u32 v);
+#define WATCH(a, v) do { if (((u32)(a) & 0x1FFFFFFCu) == g_watch) rt_watch_hit(a, v); } while (0)
+#else
+#define WATCH(a, v) do {} while (0)
+#endif
+static inline void SW(u32 a, u32 v) { WATCH(a, v); memcpy(GADDR(a), &v, 4); }
+static inline void SH(u32 a, u16 v) { WATCH(a, v); memcpy(GADDR(a), &v, 2); }
+static inline void SB(u32 a, u8 v) { WATCH(a, v); *GADDR(a) = v; }
 
 static inline u32 LWL(u32 a, u32 old) {
 	u32 shift = (a & 3) * 8, mem = LW(a & ~3u);

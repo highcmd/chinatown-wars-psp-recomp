@@ -363,3 +363,14 @@ void hle_init_imports() {
 }
 
 void install_hle_by_name(const char *lib, const char *name, HLEFunc fn) { registry()[{lib, name}] = fn; }
+
+#ifdef CTW_WATCH
+u32 g_watch = getenv("CTW_WATCH") ? (u32)strtoul(getenv("CTW_WATCH"), nullptr, 16) & 0x1FFFFFFCu : 1;
+void rt_watch_hit(u32 a, u32 v) {
+	static int n;
+	if (n++ > 40) return;
+	CPUState *c = kernel_current_ctx();
+	rt_log(LOG_RT, "watch %08x <- %08x (ra %08x)", a, v, c ? c->r[31] : 0);
+	if (c) rt_log_backtrace(c, 64);
+}
+#endif

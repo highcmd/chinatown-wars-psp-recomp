@@ -73,6 +73,7 @@ add_executable(ctw
   runtime/src/kernel_misc.cpp
   runtime/src/hle_io.cpp
   runtime/src/hle_display.cpp
+  runtime/src/osd.cpp
   runtime/src/hle_intr.cpp
   runtime/src/hle_ge.cpp
   runtime/src/ge_render.cpp
