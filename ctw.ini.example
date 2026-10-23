@@ -7,6 +7,7 @@ fullscreen = false     # F11 toggles at run time
 refresh = 0            # fullscreen: 0 = borderless at the desktop mode; e.g. 144 = switch the monitor to resolution @ 144 Hz
 filter = linear        # linear (smooth) or nearest (sharp pixels)
 vsync = false
+fps = 30               # 60 = in-between frames (GPU renderer); the game logic stays at 30
 deadzone = 8000        # gamepad left-stick deadzone, 0..32767
 right_stick_dpad = false
 show_fps = false             # F2 toggles it at run time
