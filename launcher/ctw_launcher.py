@@ -13,8 +13,8 @@ import json, os, pathlib, platform, queue, shutil, subprocess, sys, threading, t
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-APP_VERSION = "0.1.3"
-BUILD_VERSION = "0.1.3"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
+APP_VERSION = "0.1.4"
+BUILD_VERSION = "0.1.4"   # bump when runtime/ or tools/ change, so packaged users rebuild the game
 FROZEN = getattr(sys, "frozen", False)
 IS_WIN = os.name == "nt"
 HERE = pathlib.Path(__file__).resolve().parent
