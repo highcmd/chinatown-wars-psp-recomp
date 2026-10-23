@@ -333,6 +333,21 @@ class Analyzer:
         return last == 0x03E00008 or (last >> 26) == OP_J or \
             ((last & 0xFC1FFFFF) == 8 and last >> 21)
 
+    def skip_noops(self, a, limit):
+        """An orphan starts at its first instruction with an effect. Data words before an
+        unreferenced function can decode as writes to $zero (0x00010000 = sll zero,at,0); taken
+        as its start, the real entry point (reached through a computed pointer) is mid-function."""
+        p = a
+        while p + 4 < limit:
+            w = self.word(p)
+            op = w >> 26
+            alu_r = op == 0 and (w >> 11) & 31 == 0 and (w & 0x3F) in (0, 2, 3, 4, 6, 7, 0x21, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2A, 0x2B)
+            alu_i = op in (9, 10, 11, 12, 13, 14, 15) and (w >> 16) & 31 == 0
+            if not (alu_r or alu_i):
+                break
+            p += 4
+        return p if p != a and self.word(p) != 0 else a
+
     # ------------------------------------------------------------------
     def run(self):
         kinds = dict(self.seeds())
@@ -363,7 +378,7 @@ class Analyzer:
                 if a >= limit or a in kinds:
                     continue
                 if not self.img.is_overlay:
-                    new.setdefault(a, "orphan")
+                    new.setdefault(self.skip_noops(a, limit), "orphan")
                     continue
                 # overlays interleave data with code: look through the whole gap for code that
                 # starts after padding or after a return, and traces like a function
@@ -373,7 +388,7 @@ class Analyzer:
                     starts_here = p == a or prev == 0 or self.word(p - 8) == 0x03E00008 or \
                         (self.word(p - 8) >> 26) == OP_J
                     if starts_here and self.word(p) != 0 and self.clean_function(p, limit):
-                        new.setdefault(p, "orphan")
+                        new.setdefault(self.skip_noops(p, limit), "orphan")
                         break
                     p += 4
             if not new:
